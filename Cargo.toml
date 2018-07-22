@@ -1,0 +1,11 @@
+[package]
+name = "transport"
+version = "0.0.0"
+authors = ["Peter Jin <peterhaijin@gmail.com>"]
+
+[lib]
+name = "transport"
+path = "src/lib.rs"
+
+[dependencies]
+cgmath = "*"
