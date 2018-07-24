@@ -9,3 +9,5 @@ path = "src/lib.rs"
 
 [dependencies]
 cgmath = "*"
+float = { path = "../float" }
+memarray = { path = "../memarray" }

@@ -1,5 +1,14 @@
 use cgmath::*;
 
+pub struct Parametric<T> {
+  pub t:    T,
+}
+
+pub struct Barycentric2<T> {
+  pub u:    T,
+  pub v:    T,
+}
+
 pub struct Ray {
   pub orig: Vector3<f32>,
   pub dir:  Vector3<f32>,
@@ -9,13 +18,12 @@ pub struct Triangle {
   pub v0:   Vector3<f32>,
   pub v1:   Vector3<f32>,
   pub v2:   Vector3<f32>,
-  pub idxs: [usize; 3],
+  //pub idxs: [usize; 3],
 }
 
 pub struct RayTriangleIntersect {
-  pub t:    f32,
-  pub u:    f32,
-  pub v:    f32,
+  pub ray_coord:    Parametric<f32>,
+  pub tri_coords:   Barycentric2<f32>,
 }
 
 pub fn intersection(ray: &Ray, tri: &Triangle, threshold: f32) -> Option<RayTriangleIntersect> {
@@ -38,7 +46,10 @@ pub fn intersection(ray: &Ray, tri: &Triangle, threshold: f32) -> Option<RayTria
     return None;
   }
   let t = e2.dot(qvec) * inv_det;
-  Some(RayTriangleIntersect{t, u, v})
+  Some(RayTriangleIntersect{
+    ray_coord:  Parametric{t},
+    tri_coords: Barycentric2{u, v},
+  })
 }
 
 pub fn culling_intersection(ray: &Ray, tri: &Triangle, normal: &Vector3<f32>, threshold: f32) -> Option<RayTriangleIntersect> {

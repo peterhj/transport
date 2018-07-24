@@ -7,7 +7,8 @@ use std::io::{BufRead, BufReader};
 use std::path::{PathBuf};
 
 pub struct WavefrontObj {
-  faces:        Vec<Vec<(usize, Option<usize>)>>,
+  //faces:        Vec<Vec<(usize, Option<usize>)>>,
+  faces:        Vec<Vec<usize>>,
   vertexs:      Vec<Vector3<f64>>,
   texcoords:    Vec<Vector2<f64>>,
   normals:      Vec<Vector3<f64>>,
@@ -32,19 +33,27 @@ impl WavefrontObj {
             let f_toks: Vec<_> = tok.split('/').collect();
             match f_toks.len() {
               1 => {
-                // TODO
-                unimplemented!();
-              }
-              2 => {
                 let v_rank: usize = f_toks[0].parse().unwrap();
                 assert!(v_rank >= 1);
-                let vt_rank: usize = f_toks[1].parse().unwrap();
+                face.push(v_rank - 1);
+              }
+              2 => {
+                // TODO
+                let v_rank: usize = f_toks[0].parse().unwrap();
+                assert!(v_rank >= 1);
+                face.push(v_rank - 1);
+                /*let vt_rank: usize = f_toks[1].parse().unwrap();
                 assert!(vt_rank >= 1);
-                face.push((v_rank - 1, Some(vt_rank - 1)));
+                face.push((v_rank - 1, Some(vt_rank - 1)));*/
               }
               3 => {
                 // TODO
-                unimplemented!();
+                let v_rank: usize = f_toks[0].parse().unwrap();
+                assert!(v_rank >= 1);
+                face.push(v_rank - 1);
+                /*let vt_rank: usize = f_toks[2].parse().unwrap();
+                assert!(vt_rank >= 1);
+                face.push((v_rank - 1, Some(vt_rank - 1)));*/
               }
               _ => unimplemented!(),
             }
@@ -84,16 +93,31 @@ impl WavefrontObj {
     let mut polys = vec![];
     for f in faces.iter() {
       let mut fvs = vec![];
-      for fv in f.iter() {
-        fvs.push(vertexs[fv.0]);
+      for &fv in f.iter() {
+        fvs.push(vertexs[fv]);
       }
       polys.push(fvs);
     }
     polys
   }
 
-  pub fn to_tri_mesh(&self) -> TriMesh {
-    // TODO
-    unimplemented!();
+  pub fn to_mesh(&self) -> TriMesh {
+    let vertexs: Vec<_> = self.vertexs.iter().map(|v| v.cast().unwrap()).collect();
+    let normals: Vec<_> = self.normals.iter().map(|v| v.cast().unwrap()).collect();
+    let polys = self.polys();
+    let mut triangles = Vec::with_capacity(polys.len());
+    for poly in polys.iter() {
+      assert_eq!(3, poly.len());
+      triangles.push(Triangle{
+        v0: poly[0].cast().unwrap(),
+        v1: poly[1].cast().unwrap(),
+        v2: poly[2].cast().unwrap(),
+      });
+    }
+    println!("DEBUG: mesh: num vertexs: {}", vertexs.len());
+    println!("DEBUG: mesh: num triangles: {}", triangles.len());
+    TriMesh{
+      vertexs, normals, triangles,
+    }
   }
 }
