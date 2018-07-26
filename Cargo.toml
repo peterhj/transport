@@ -7,6 +7,9 @@ authors = ["Peter Jin <peterhaijin@gmail.com>"]
 name = "transport"
 path = "src/lib.rs"
 
+[dev-dependencies]
+stb_image = { path = "../rust-stb-image" }
+
 [dependencies]
 cgmath = "*"
 float = { path = "../float" }

@@ -113,6 +113,7 @@ impl WavefrontObj {
         v1: poly[1].cast().unwrap(),
         v2: poly[2].cast().unwrap(),
       });
+      //println!("DEBUG: mesh:   v0: {:?}", poly[0]);
     }
     println!("DEBUG: mesh: num vertexs: {}", vertexs.len());
     println!("DEBUG: mesh: num triangles: {}", triangles.len());
