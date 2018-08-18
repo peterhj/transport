@@ -10,7 +10,6 @@ pub struct WavefrontObj {
   //faces:        Vec<Vec<(usize, Option<usize>)>>,
   faces:        Vec<Vec<usize>>,
   vertexs:      Vec<Vector3<f64>>,
-  texcoords:    Vec<Vector2<f64>>,
   normals:      Vec<Vector3<f64>>,
 }
 
@@ -22,7 +21,6 @@ impl WavefrontObj {
     let mut faces = vec![];
     let mut vertexs = vec![];
     let mut normals = vec![];
-    let mut texcoords = vec![];
     for line in reader.lines() {
       let line = line.unwrap();
       let toks: Vec<_> = line.split_whitespace().collect();
@@ -42,18 +40,12 @@ impl WavefrontObj {
                 let v_rank: usize = f_toks[0].parse().unwrap();
                 assert!(v_rank >= 1);
                 face.push(v_rank - 1);
-                /*let vt_rank: usize = f_toks[1].parse().unwrap();
-                assert!(vt_rank >= 1);
-                face.push((v_rank - 1, Some(vt_rank - 1)));*/
               }
               3 => {
                 // TODO
                 let v_rank: usize = f_toks[0].parse().unwrap();
                 assert!(v_rank >= 1);
                 face.push(v_rank - 1);
-                /*let vt_rank: usize = f_toks[2].parse().unwrap();
-                assert!(vt_rank >= 1);
-                face.push((v_rank - 1, Some(vt_rank - 1)));*/
               }
               _ => unimplemented!(),
             }
@@ -72,11 +64,6 @@ impl WavefrontObj {
           let nz: f64 = toks[3].parse().unwrap();
           normals.push(Vector3::new(nx, ny, nz));
         }
-        "vt" => {
-          let tx: f64 = toks[1].parse().unwrap();
-          let ty: f64 = toks[2].parse().unwrap();
-          texcoords.push(Vector2::new(tx, ty));
-        }
         _ => {}
       }
     }
@@ -84,7 +71,6 @@ impl WavefrontObj {
       faces,
       vertexs,
       normals,
-      texcoords,
     }
   }
 

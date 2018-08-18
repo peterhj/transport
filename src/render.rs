@@ -26,7 +26,7 @@ pub struct NoFrillsDepthRender {
 impl Renderable<NoFrillsDepthRender> for SimpleMeshScene {
   fn render(&self, cfg: &NoFrillsDepthRender, buf: &mut MemArray3d<u8>) {
     let mut flat_buf = buf.flat_view_mut().unwrap();
-    let mut flat_buf = flat_buf.as_mut_slice();
+    let flat_buf = flat_buf.as_mut_slice();
     let aspect_ratio = cfg.height as f32 / cfg.width as f32;
     let camera_width = cfg.cam_width;
     let camera_height = aspect_ratio * camera_width;

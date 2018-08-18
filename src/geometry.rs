@@ -14,6 +14,49 @@ pub struct Ray {
   pub dir:  Vector3<f32>,
 }
 
+pub trait IntersectsRay {
+  type Intersection;
+
+  fn intersects_ray(&self, ray: &Ray, threshold: f32) -> Option<Self::Intersection>;
+}
+
+pub struct Sphere {
+  pub center:   Vector3<f32>,
+  pub radius:   f32,
+}
+
+pub struct SphereRayIntersection {
+  pub ray_coord:    Parametric<f32>,
+}
+
+impl IntersectsRay for Sphere {
+  type Intersection = SphereRayIntersection;
+
+  fn intersects_ray(&self, ray: &Ray, threshold: f32) -> Option<Self::Intersection> {
+    let delta = ray.orig - self.center;
+    let b = ray.dir.dot(delta);
+    let determinant = b * b + self.radius * self.radius - delta.dot(delta);
+    if determinant < -threshold {
+      None
+    } else if determinant.abs() <= threshold {
+      let t = -b;
+      Some(SphereRayIntersection{ray_coord: Parametric{t}})
+    } else if determinant > threshold {
+      let t1 = -b - determinant.sqrt();
+      let t2 = -b + determinant.sqrt();
+      let t = match (t1 < 0.0, t2 < 0.0) {
+        (false, false)  => t1.min(t2),
+        (false, true)   => t1,
+        (true,  false)  => t2,
+        (true,  true)   => return None,
+      };
+      Some(SphereRayIntersection{ray_coord: Parametric{t}})
+    } else {
+      unreachable!();
+    }
+  }
+}
+
 pub struct Triangle {
   pub v0:   Vector3<f32>,
   pub v1:   Vector3<f32>,
@@ -24,6 +67,15 @@ pub struct Triangle {
 pub struct RayTriangleIntersect {
   pub ray_coord:    Parametric<f32>,
   pub tri_coords:   Barycentric2<f32>,
+}
+
+impl IntersectsRay for Triangle {
+  type Intersection = RayTriangleIntersect;
+
+  fn intersects_ray(&self, ray: &Ray, threshold: f32) -> Option<Self::Intersection> {
+    // TODO
+    intersection(ray, self, threshold)
+  }
 }
 
 pub fn intersection(ray: &Ray, tri: &Triangle, threshold: f32) -> Option<RayTriangleIntersect> {
@@ -50,11 +102,6 @@ pub fn intersection(ray: &Ray, tri: &Triangle, threshold: f32) -> Option<RayTria
     ray_coord:  Parametric{t},
     tri_coords: Barycentric2{u, v},
   })
-}
-
-pub fn culling_intersection(ray: &Ray, tri: &Triangle, normal: &Vector3<f32>, threshold: f32) -> Option<RayTriangleIntersect> {
-  // TODO
-  unimplemented!();
 }
 
 pub struct TriMesh {
