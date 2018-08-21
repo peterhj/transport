@@ -164,6 +164,26 @@ pub struct SimpleMeshScene {
   pub objs: Vec<TriMesh>,
 }
 
+impl IntersectsRay for SimpleMeshScene {
+  fn intersects_ray(&self, ray: &Ray, threshold: f32) -> Option<RayIntersection> {
+    let mut obj_ixns = vec![];
+    for (obj_idx, obj) in self.objs.iter().enumerate() {
+      if let Some(ixn) = obj.intersects_ray(&ray, 1.0e-6) {
+        obj_ixns.push((obj_idx, ixn));
+      }
+    }
+    if obj_ixns.is_empty() {
+      None
+    } else {
+      obj_ixns.sort_unstable_by_key(|(_, ixn)| {
+        let t = ixn.ray_coord.t;
+        F32SupNan(if t < 0.0 { 1.0 / 0.0 } else { t })
+      });
+      Some(obj_ixns[0].1)
+    }
+  }
+}
+
 #[derive(Clone, Default)]
 pub struct SimpleScene {
   pub objs: Vec<Rc<IntersectsRay>>,
@@ -176,5 +196,25 @@ impl SimpleScene {
 
   pub fn add_object<Obj: IntersectsRay + 'static>(&mut self, obj: Obj) {
     self.objs.push(Rc::new(obj));
+  }
+}
+
+impl IntersectsRay for SimpleScene {
+  fn intersects_ray(&self, ray: &Ray, threshold: f32) -> Option<RayIntersection> {
+    let mut obj_ixns = vec![];
+    for (obj_idx, obj) in self.objs.iter().enumerate() {
+      if let Some(ixn) = obj.intersects_ray(&ray, 1.0e-6) {
+        obj_ixns.push((obj_idx, ixn));
+      }
+    }
+    if obj_ixns.is_empty() {
+      None
+    } else {
+      obj_ixns.sort_unstable_by_key(|(_, ixn)| {
+        let t = ixn.ray_coord.t;
+        F32SupNan(if t < 0.0 { 1.0 / 0.0 } else { t })
+      });
+      Some(obj_ixns[0].1)
+    }
   }
 }
