@@ -12,5 +12,6 @@ stb_image = { path = "../rust-stb-image" }
 
 [dependencies]
 cgmath = "*"
-float = { path = "../float" }
+#float = { path = "../float" }
+float = "*"
 memarray = { path = "../memarray" }
