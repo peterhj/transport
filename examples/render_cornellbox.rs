@@ -15,13 +15,13 @@ use std::io::{Write};
 use std::path::{PathBuf};
 
 fn main() {
-  //let sphere1 = WavefrontObj::open(PathBuf::from("data/cbox/meshes/sphere1.obj")).to_mesh();
-  //let sphere2 = WavefrontObj::open(PathBuf::from("data/cbox/meshes/sphere2.obj")).to_mesh();
+  //let sphere1 = WavefrontObj::open(PathBuf::from("data/cbox_old/meshes/sphere1.obj")).to_mesh();
+  //let sphere2 = WavefrontObj::open(PathBuf::from("data/cbox_old/meshes/sphere2.obj")).to_mesh();
   let sphere1 = Sphere::new(Vector3::new(-0.421398, 0.332102, -0.280000), 0.326352);
   let sphere2 = Sphere::new(Vector3::new(0.445842, 0.332102, 0.376744), 0.326352);
-  let walls = WavefrontObj::open(PathBuf::from("data/cbox/meshes/walls.obj")).to_mesh();
-  let leftwall = WavefrontObj::open(PathBuf::from("data/cbox/meshes/leftwall.obj")).to_mesh();
-  let rightwall = WavefrontObj::open(PathBuf::from("data/cbox/meshes/rightwall.obj")).to_mesh();
+  let walls = WavefrontObj::open(PathBuf::from("data/cbox_old/meshes/walls.obj")).to_mesh();
+  let leftwall = WavefrontObj::open(PathBuf::from("data/cbox_old/meshes/leftwall.obj")).to_mesh();
+  let rightwall = WavefrontObj::open(PathBuf::from("data/cbox_old/meshes/rightwall.obj")).to_mesh();
   /*let scene = SimpleMeshScene{objs: vec![
       sphere1,
       sphere2,
