@@ -24,12 +24,23 @@ pub enum InterfaceEvent {
   Transmit(Ray),
 }
 
-pub trait Interface {
-  fn scatter_bwd(&self, out_ray: Ray) -> InterfaceEvent;
+pub trait InterfaceMat {
+  fn scatter_surf_bwd(&self, out_ray: Ray) -> InterfaceEvent;
+}
+
+pub struct DielectricDielectricInterfaceMatDef {
+  // TODO
+}
+
+impl InterfaceMat for DielectricDielectricInterfaceMatDef {
+  fn scatter_surf_bwd(&self, out_ray: Ray) -> InterfaceEvent {
+    // TODO
+    unimplemented!();
+  }
 }
 
 pub trait SurfaceMat {
-  fn emit_surf(&self, out_ray: Ray) -> f32;
+  fn query_surf_emission(&self, out_ray: Ray) -> f32;
 }
 
 #[derive(Clone, Copy)]
@@ -45,21 +56,38 @@ pub enum AttenuationEvent {
   Attenuate(Vector, f32),
 }
 
-pub trait VolumeMat {
-  fn absorbing_coef_at(&self, x: Vector) -> f32;
-  fn scattering_coef_at(&self, x: Vector) -> f32;
-  fn scatter_bwd(&self, out_ray: Ray) -> ScatterEvent;
+#[derive(Clone, Copy)]
+pub enum VolumeMatKind {
+  Dielectric,
+}
 
-  fn extinction_coef_at(&self, x: Vector) -> f32 {
-    self.absorbing_coef_at(x) + self.scattering_coef_at(x)
+pub trait VolumeMat {
+  fn mat_kind(&self) -> VolumeMatKind;
+  fn vol_absorbing_coef_at(&self, x: Vector) -> f32;
+  fn vol_scattering_coef_at(&self, x: Vector) -> f32;
+  fn scatter_vol_bwd(&self, out_ray: Ray) -> ScatterEvent;
+  fn query_vol_emission(&self, out_ray: Ray) -> f32;
+
+  fn interface_with(&self, other: &VolumeMat) -> Rc<dyn InterfaceMat> {
+    match (self.mat_kind(), other.mat_kind()) {
+      (VolumeMatKind::Dielectric, VolumeMatKind::Dielectric) => {
+        Rc::new(DielectricDielectricInterfaceMatDef{
+          // TODO
+        })
+      }
+    }
   }
 
-  fn max_extinction_coef(&self) -> Option<f32> {
+  fn vol_extinction_coef_at(&self, x: Vector) -> f32 {
+    self.vol_absorbing_coef_at(x) + self.vol_scattering_coef_at(x)
+  }
+
+  fn max_vol_extinction_coef(&self) -> Option<f32> {
     None
   }
 
   fn woodcock_track_bwd(&self, out_ray: Ray, cutoff_dist: Option<f32>) -> AttenuationEvent {
-    let max_coef = match self.max_extinction_coef() {
+    let max_coef = match self.max_vol_extinction_coef() {
       Some(coef) => coef,
       None => panic!("woodcock sampling requires upper bound on extinction coef"),
     };
@@ -79,7 +107,7 @@ pub trait VolumeMat {
           return AttenuationEvent::Cutoff(xp, s / max_coef);
         }
       }
-      if u2 * max_coef < self.extinction_coef_at(xp) {
+      if u2 * max_coef < self.vol_extinction_coef_at(xp) {
         break;
       }
     }
@@ -89,6 +117,7 @@ pub trait VolumeMat {
 
 #[derive(Clone)]
 pub struct HomogeneousVolumeMatDef {
+  pub mat_kind:     VolumeMatKind,
   pub absorb_coef:  f32,
   pub scatter_coef: f32,
   pub scatter_dist: Option<Rc<dyn HomogeneousScatterDist>>,
@@ -129,20 +158,18 @@ pub struct QueryOpts {
   pub roulette_term_p:  Option<f32>,
 }
 
+pub trait VtraceObj {
+  fn interior_mat(&self) -> Rc<dyn VolumeMat>;
+}
+
 pub trait VtraceScene {
   fn trace_bwd(&self, out_ray: Ray, obj_id: Option<usize>) -> TraceEvent;
   fn query_surf_rad_bwd(&self, out_ray: Ray, inc_obj_id: Option<usize>, ext_obj_id: Option<usize>, default_opts: QueryOpts) -> f32;
   fn query_vol_rad_bwd(&self, out_ray: Ray, obj_id: Option<usize>, top_level: bool, default_opts: QueryOpts) -> f32;
 }
 
-pub trait VtraceObj {
-  fn interior_mat(&self) -> Rc<dyn VolumeMat>;
-}
-
 pub struct SimpleVtraceScene {
-  default_mat:  Rc<dyn VolumeMat>,
-  //lights:       Vec<Rc<dyn VtraceLight>>,
-  //objs:         Vec<Rc<dyn VtraceObj>>,
+  objs: Vec<Rc<dyn VtraceObj>>,
 }
 
 impl VtraceScene for SimpleVtraceScene {
@@ -157,21 +184,33 @@ impl VtraceScene for SimpleVtraceScene {
     // FIXME: determine the current objects.
     let inc_obj = unimplemented!();
     let ext_obj = unimplemented!();
-    // FIXME: interface depends on _two_ object mats.
-    let interface = unimplemented!();
-    let emit_rad = ext_obj.emit_surf(out_ray);
-    // TODO: roulette importance sampling.
-    let mc_est_rad = match interface.scatter_bwd(out_ray) {
-      InterfaceEvent::Absorb => {
+    let interface = inc_obj.interface_with(ext_obj);
+    let emit_rad = ext_obj.query_surf_emission(out_ray);
+    let mc_est_rad = {
+      let (do_mc, mc_norm) = if default_opts.roulette_term_p.is_none() {
+        (true, 1.0)
+      } else {
+        let mc_p = 1.0 - default_opts.roulette_term_p.unwrap();
+        let mc_u = thread_rng().sample(Standard);
+        (mc_u < mc_p, mc_p)
+      };
+      if do_mc {
+        let raw_mc_est = match interface.scatter_surf_bwd(out_ray) {
+          InterfaceEvent::Absorb => {
+            0.0
+          }
+          InterfaceEvent::Reflect(in_ray) => {
+            let next_est_rad = self.query_vol_rad_bwd(in_ray, inc_obj_id, false, default_opts);
+            next_est_rad
+          }
+          InterfaceEvent::Transmit(in_ray) => {
+            let next_est_rad = self.query_vol_rad_bwd(in_ray, ext_obj_id, false, default_opts);
+            next_est_rad
+          }
+        };
+        raw_mc_est / mc_norm
+      } else {
         0.0
-      }
-      InterfaceEvent::Reflect(in_ray) => {
-        let next_est_rad = self.query_vol_rad_bwd(in_ray, inc_obj_id, false, default_opts);
-        next_est_rad
-      }
-      InterfaceEvent::Transmit(in_ray) => {
-        let next_est_rad = self.query_vol_rad_bwd(in_ray, ext_obj_id, false, default_opts);
-        next_est_rad
       }
     };
     let this_rad = emit_rad + mc_est_rad;
@@ -188,33 +227,46 @@ impl VtraceScene for SimpleVtraceScene {
         (Some(dist), Some(p), obj_id)
       }
     };
-    // TODO: roulette importance sampling.
-    // FIXME: determine which volume is currently "inside";
-    // if `vol_obj_id` is given, use that one, otherwise calculate from scratch.
-    let this_obj = self.default_mat.clone();
-    // TODO: volume emission.
-    let emit_rad = 0.0;
-    // TODO: roulette importance sampling.
-    let mc_est_rad = match this_obj.woodcock_track_bwd(out_dst_ray, surf_cutoff_dist) {
-      AttenuationEvent::NonTerm => {
-        0.0
-      }
-      AttenuationEvent::Cutoff(..) => {
-        let out_src_ray = Ray{orig: surf_pt.unwrap(), dir: out_dst_ray.dir};
-        let next_est_rad = self.query_surf_rad_bwd(out_src_ray, vol_obj_id, surf_obj_id, default_opts);
-        next_est_rad
-      }
-      AttenuationEvent::Attenuate(p, dist) => {
-        let out_src_ray = Ray{orig: p, dir: out_dst_ray.dir};
-        let next_est_rad = match this_obj.scatter_bwd(out_src_ray) {
-          ScatterEvent::Absorb => {
+    let this_obj = match vol_obj_id {
+      None => unimplemented!("not querying objects by coordinates yet"),
+      Some(vol_obj_id) => self.objs[vol_obj_id].clone(),
+    };
+    let this_mat = this_obj.interior_mat();
+    let emit_rad = this_mat.query_vol_emission(out_dst_ray);
+    let mc_est_rad = {
+      let (do_mc, mc_norm) = if top_level || default_opts.roulette_term_p.is_none() {
+        (true, 1.0)
+      } else {
+        let mc_p = 1.0 - default_opts.roulette_term_p.unwrap();
+        let mc_u = thread_rng().sample(Standard);
+        (mc_u < mc_p, mc_p)
+      };
+      if do_mc {
+        let raw_mc_est = match this_mat.woodcock_track_bwd(out_dst_ray, surf_cutoff_dist) {
+          AttenuationEvent::NonTerm => {
             0.0
           }
-          ScatterEvent::Scatter(in_ray) => {
-            self.query_vol_rad_bwd(in_ray, vol_obj_id, false, default_opts)
+          AttenuationEvent::Cutoff(..) => {
+            let out_src_ray = Ray{orig: surf_pt.unwrap(), dir: out_dst_ray.dir};
+            let next_est_rad = self.query_surf_rad_bwd(out_src_ray, vol_obj_id, surf_obj_id, default_opts);
+            next_est_rad
+          }
+          AttenuationEvent::Attenuate(p, dist) => {
+            let out_src_ray = Ray{orig: p, dir: out_dst_ray.dir};
+            let next_est_rad = match this_mat.scatter_vol_bwd(out_src_ray) {
+              ScatterEvent::Absorb => {
+                0.0
+              }
+              ScatterEvent::Scatter(in_ray) => {
+                self.query_vol_rad_bwd(in_ray, vol_obj_id, false, default_opts)
+              }
+            };
+            next_est_rad
           }
         };
-        next_est_rad
+        raw_mc_est / mc_norm
+      } else {
+        0.0
       }
     };
     let this_rad = emit_rad + mc_est_rad;
