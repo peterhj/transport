@@ -22,10 +22,12 @@ pub struct HemiSolidAngle<T> {
   pub radial:   T,
 }
 
+pub type Vector = Vector3<f32>;
+
 #[derive(Clone, Copy)]
 pub struct Ray {
-  pub orig: Vector3<f32>,
-  pub dir:  Vector3<f32>,
+  pub orig: Vector,
+  pub dir:  Vector,
 }
 
 #[derive(Clone, Copy)]
