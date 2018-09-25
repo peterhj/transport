@@ -43,6 +43,10 @@ pub trait SurfaceMat {
   fn query_surf_emission(&self, out_ray: Ray) -> f32;
 }
 
+#[derive(Default)]
+pub struct InvisibleSurfaceMatDef {
+}
+
 #[derive(Clone, Copy)]
 pub enum ScatterEvent {
   Absorb,
@@ -116,11 +120,12 @@ pub trait VolumeMat {
 }
 
 #[derive(Clone)]
-pub struct HomogeneousVolumeMatDef {
-  pub mat_kind:     VolumeMatKind,
-  pub absorb_coef:  f32,
-  pub scatter_coef: f32,
-  pub scatter_dist: Option<Rc<dyn HomogeneousScatterDist>>,
+pub struct HomogeneousDielectricVolumeMatDef {
+  //pub mat_kind:     VolumeMatKind,
+  pub refractive_index: f32,
+  pub absorb_coef:      f32,
+  pub scatter_coef:     f32,
+  pub scatter_dist:     Option<Rc<dyn HomogeneousScatterDist>>,
 }
 
 pub trait HomogeneousScatterDist {
@@ -155,17 +160,19 @@ pub enum TraceEvent {
 
 #[derive(Clone, Copy)]
 pub struct QueryOpts {
+  pub importance_clip:  Option<f32>,
   pub roulette_term_p:  Option<f32>,
 }
 
 pub trait VtraceObj {
-  fn interior_mat(&self) -> Rc<dyn VolumeMat>;
+  fn boundary_surf_mat(&self) -> Rc<dyn SurfaceMat>;
+  fn interior_vol_mat(&self) -> Rc<dyn VolumeMat>;
 }
 
 pub trait VtraceScene {
   fn trace_bwd(&self, out_ray: Ray, obj_id: Option<usize>) -> TraceEvent;
   fn query_surf_rad_bwd(&self, out_ray: Ray, inc_obj_id: Option<usize>, ext_obj_id: Option<usize>, default_opts: QueryOpts) -> f32;
-  fn query_vol_rad_bwd(&self, out_ray: Ray, obj_id: Option<usize>, top_level: bool, default_opts: QueryOpts) -> f32;
+  fn query_vol_rad_bwd(&self, out_ray: Ray, obj_id: Option<usize>, top_level: bool, /*top_level_opts: Option<QueryOpts>,*/ default_opts: QueryOpts) -> f32;
 }
 
 pub struct SimpleVtraceScene {
@@ -180,22 +187,31 @@ impl VtraceScene for SimpleVtraceScene {
 
   fn query_surf_rad_bwd(&self, out_ray: Ray, inc_obj_id: Option<usize>, ext_obj_id: Option<usize>, default_opts: QueryOpts) -> f32 {
     // TODO
-    // FIXME: need to project the intersection to the surface;
-    // FIXME: determine the current objects.
-    let inc_obj = unimplemented!();
-    let ext_obj = unimplemented!();
-    let interface = inc_obj.interface_with(ext_obj);
-    let emit_rad = ext_obj.query_surf_emission(out_ray);
+    // TODO: project the intersection to the surface;
+    let inc_obj = match inc_obj_id {
+      None => unimplemented!("querying objects by coordinates is not supported"),
+      Some(id) => self.objs[id].clone(),
+    };
+    let ext_obj = match ext_obj_id {
+      None => unimplemented!("querying objects by coordinates is not supported"),
+      Some(id) => self.objs[id].clone(),
+    };
+    let inc_surf = inc_obj.boundary_surf_mat();
+    let inc_vol = inc_obj.interior_vol_mat();
+    let ext_surf = ext_obj.boundary_surf_mat();
+    let ext_vol = ext_obj.interior_vol_mat();
+    let interface = inc_vol.interface_with(&*ext_vol);
+    let emit_rad = inc_surf.query_surf_emission(out_ray) + ext_surf.query_surf_emission(out_ray);
     let mc_est_rad = {
-      let (do_mc, mc_norm) = if default_opts.roulette_term_p.is_none() {
-        (true, 1.0)
+      let (do_mc, roulette_mc_norm) = if default_opts.roulette_term_p.is_none() {
+        (true, None)
       } else {
         let mc_p = 1.0 - default_opts.roulette_term_p.unwrap();
-        let mc_u = thread_rng().sample(Standard);
-        (mc_u < mc_p, mc_p)
+        let mc_u: f32 = thread_rng().sample(Standard);
+        (mc_u < mc_p, Some(mc_p))
       };
       if do_mc {
-        let raw_mc_est = match interface.scatter_surf_bwd(out_ray) {
+        let recurs_mc_est = match interface.scatter_surf_bwd(out_ray) {
           InterfaceEvent::Absorb => {
             0.0
           }
@@ -208,7 +224,19 @@ impl VtraceScene for SimpleVtraceScene {
             next_est_rad
           }
         };
-        raw_mc_est / mc_norm
+        let total_mc_norm = roulette_mc_norm.unwrap_or(1.0);
+        match default_opts.importance_clip {
+          Some(c) => {
+            if c * total_mc_norm < 1.0 {
+              recurs_mc_est * c
+            } else {
+              recurs_mc_est / total_mc_norm
+            }
+          }
+          None => {
+            recurs_mc_est / total_mc_norm
+          }
+        }
       } else {
         0.0
       }
@@ -228,32 +256,32 @@ impl VtraceScene for SimpleVtraceScene {
       }
     };
     let this_obj = match vol_obj_id {
-      None => unimplemented!("not querying objects by coordinates yet"),
-      Some(vol_obj_id) => self.objs[vol_obj_id].clone(),
+      None => unimplemented!("querying objects by coordinates is not supported"),
+      Some(id) => self.objs[id].clone(),
     };
-    let this_mat = this_obj.interior_mat();
-    let emit_rad = this_mat.query_vol_emission(out_dst_ray);
+    let this_vol = this_obj.interior_vol_mat();
+    let emit_rad = this_vol.query_vol_emission(out_dst_ray);
     let mc_est_rad = {
-      let (do_mc, mc_norm) = if top_level || default_opts.roulette_term_p.is_none() {
-        (true, 1.0)
+      let (do_mc, roulette_mc_norm) = if top_level || default_opts.roulette_term_p.is_none() {
+        (true, None)
       } else {
         let mc_p = 1.0 - default_opts.roulette_term_p.unwrap();
-        let mc_u = thread_rng().sample(Standard);
-        (mc_u < mc_p, mc_p)
+        let mc_u: f32 = thread_rng().sample(Standard);
+        (mc_u < mc_p, Some(mc_p))
       };
       if do_mc {
-        let raw_mc_est = match this_mat.woodcock_track_bwd(out_dst_ray, surf_cutoff_dist) {
+        let (recurs_mc_est, recurs_mc_norm)  = match this_vol.woodcock_track_bwd(out_dst_ray, surf_cutoff_dist) {
           AttenuationEvent::NonTerm => {
-            0.0
+            (0.0, None)
           }
           AttenuationEvent::Cutoff(..) => {
             let out_src_ray = Ray{orig: surf_pt.unwrap(), dir: out_dst_ray.dir};
             let next_est_rad = self.query_surf_rad_bwd(out_src_ray, vol_obj_id, surf_obj_id, default_opts);
-            next_est_rad
+            (next_est_rad, None)
           }
           AttenuationEvent::Attenuate(p, dist) => {
             let out_src_ray = Ray{orig: p, dir: out_dst_ray.dir};
-            let next_est_rad = match this_mat.scatter_vol_bwd(out_src_ray) {
+            let next_est_rad = match this_vol.scatter_vol_bwd(out_src_ray) {
               ScatterEvent::Absorb => {
                 0.0
               }
@@ -261,10 +289,22 @@ impl VtraceScene for SimpleVtraceScene {
                 self.query_vol_rad_bwd(in_ray, vol_obj_id, false, default_opts)
               }
             };
-            next_est_rad
+            (next_est_rad, Some(this_vol.vol_extinction_coef_at(out_src_ray.orig)))
           }
         };
-        raw_mc_est / mc_norm
+        let total_mc_norm = roulette_mc_norm.unwrap_or(1.0) * recurs_mc_norm.unwrap_or(1.0);
+        match default_opts.importance_clip {
+          Some(c) => {
+            if c * total_mc_norm < 1.0 {
+              recurs_mc_est * c
+            } else {
+              recurs_mc_est / total_mc_norm
+            }
+          }
+          None => {
+            recurs_mc_est / total_mc_norm
+          }
+        }
       } else {
         0.0
       }
