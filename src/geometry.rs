@@ -26,8 +26,8 @@ pub type Vector = Vector3<f32>;
 
 #[derive(Clone, Copy)]
 pub struct Ray {
-  pub orig: Vector,
-  pub dir:  Vector,
+  pub origin:   Vector,
+  pub dir:      Vector,
 }
 
 #[derive(Clone, Copy)]
@@ -63,7 +63,7 @@ impl IntersectsRay for Sphere {
   //type Intersection = SphereRayIntersection;
 
   fn intersects_ray(&self, ray: &Ray, threshold: f32) -> Option<RayIntersection> {
-    let delta = ray.orig - self.center;
+    let delta = ray.origin - self.center;
     let b = ray.dir.dot(delta);
     let determinant = b * b + self.radius * self.radius - delta.dot(delta);
     if determinant < -threshold {
@@ -112,7 +112,7 @@ impl IntersectsRay for Triangle {
       return None;
     }
     let inv_det = 1.0 / det;
-    let tvec = ray.orig - self.v0;
+    let tvec = ray.origin - self.v0;
     let u = tvec.dot(pvec) * inv_det;
     if u < 0.0 || u > 1.0 {
       return None;

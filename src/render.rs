@@ -51,7 +51,7 @@ fn simple_depth_render<Scene: IntersectsRay>(scene: &Scene, cfg: &NoFrillsDepthR
       let camera_w = cfg.cam_depth;
       let camera_relp = Vector3{x: camera_u, y: camera_v, z: camera_w}.normalize();
       let camera_p = rel_to_world.rotate_vector(camera_relp).normalize();
-      let ray = Ray{orig: camera_orig, dir: camera_p};
+      let ray = Ray{origin: camera_orig, dir: camera_p};
       let depth = match scene.intersects_ray(&ray, 1.0e-6) {
         None => 1.0 / 0.0,
         Some(ixn) => ixn.ray_coord.t,
@@ -128,7 +128,7 @@ fn backward_roulette_render<Scene: TraceRay>(scene: &Scene, cfg: &RouletteRender
           let camera_w = camera_depth;
           let camera_relp = Vector3{x: camera_u, y: camera_v, z: camera_w}.normalize();
           let camera_p = rel_to_world.rotate_vector(camera_relp).normalize();
-          let ray = Ray{orig: camera_orig, dir: camera_p};
+          let ray = Ray{origin: camera_orig, dir: camera_p};
           match scene.trace_ray(&ray, epsilon) {
             None => {
               ray_rad_est = Some(0.0);

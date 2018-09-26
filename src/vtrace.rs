@@ -21,26 +21,41 @@ fn clip_radian(mut t: f32) -> f32 {
 #[derive(Clone, Copy)]
 pub enum InterfaceEvent {
   Absorb,
-  Reflect(Ray),
-  Transmit(Ray),
+  Reflect(Vector),
+  Transmit(Vector),
 }
 
 pub trait InterfaceMat {
-  fn scatter_surf_bwd(&self, inc_dir: Vector, inc_normal: Vector) -> InterfaceEvent;
+  fn scatter_surf_bwd(&self, inc_out_dir: Vector, inc_normal: Vector) -> InterfaceEvent;
 }
 
 pub struct DielectricDielectricInterfaceMatDef {
-  // TODO
-  //inc_normal_dir:       Vector,
   inc_refractive_index: f32,
   ext_refractive_index: f32,
 }
 
 impl InterfaceMat for DielectricDielectricInterfaceMatDef {
-  fn scatter_surf_bwd(&self, inc_dir: Vector, inc_normal: Vector) -> InterfaceEvent {
+  fn scatter_surf_bwd(&self, inc_out_dir: Vector, normal: Vector, /*epsilon: f32*/) -> InterfaceEvent {
     // TODO
-    // TODO: Snell's and Fresnel's laws.
-    unimplemented!();
+    // TODO: Fresnel's laws.
+    // TODO: Snell's law.
+    let i_idx = self.inc_refractive_index;
+    let e_idx = self.ext_refractive_index;
+    let ratio = i_idx / e_idx;
+    let i_cos = inc_out_dir.dot(normal).min(1.0);
+    assert!(i_cos >= 0.0);
+    let i_sin = (1.0 - i_cos * i_cos).sqrt().min(1.0);
+    let e_sin = ratio * i_sin;
+    if e_sin < 0.0 {
+      unreachable!();
+    } else if e_sin > 1.0 {
+      let inc_in_dir = (inc_out_dir - 2.0 * i_cos * normal).normalize();
+      InterfaceEvent::Reflect(inc_in_dir)
+    } else {
+      let e_cos = (1.0 - e_sin * e_sin).sqrt().min(1.0);
+      let ext_in_dir = (ratio * inc_out_dir - (ratio * i_cos - e_cos) * normal).normalize();
+      InterfaceEvent::Transmit(ext_in_dir)
+    }
   }
 }
 
@@ -109,13 +124,13 @@ pub trait VolumeMat {
       return AttenuationEvent::NonTerm;
     }
     let cutoff_s = cutoff_dist.map(|d| d * max_coef);
-    let mut xp = out_ray.orig;
+    let mut xp = out_ray.origin;
     let mut s = 0.0;
     loop {
       let u1: f32 = thread_rng().sample(OpenClosed01);
       let u2: f32 = thread_rng().sample(Standard);
       s -= u1.ln();
-      xp = out_ray.orig - s * out_ray.dir / max_coef;
+      xp = out_ray.origin - s * out_ray.dir / max_coef;
       if let Some(cutoff_s) = cutoff_s {
         if s >= cutoff_s {
           return AttenuationEvent::Cutoff(xp, s / max_coef);
@@ -151,8 +166,8 @@ impl VolumeMat for HomogeneousDielectricVolumeMatDef {
   }
 
   fn scatter_vol_bwd(&self, out_ray: Ray) -> ScatterEvent {
-    let a_coef = self.vol_absorbing_coef_at(out_ray.orig);
-    let total_coef = self.vol_extinction_coef_at(out_ray.orig);
+    let a_coef = self.vol_absorbing_coef_at(out_ray.origin);
+    let total_coef = self.vol_extinction_coef_at(out_ray.origin);
     let u: f32 = thread_rng().sample(Uniform::new(0.0, total_coef));
     if u < a_coef {
       ScatterEvent::Absorb
@@ -161,7 +176,7 @@ impl VolumeMat for HomogeneousDielectricVolumeMatDef {
         None => unreachable!(),
         Some(ref scatter_dist) => {
           let in_dir = scatter_dist.sample_bwd(out_ray.dir);
-          ScatterEvent::Scatter(Ray{orig: out_ray.orig, dir: in_dir})
+          ScatterEvent::Scatter(Ray{origin: out_ray.origin, dir: in_dir})
         }
       }
     } else {
@@ -204,6 +219,7 @@ impl HomogeneousScatterDist for HGScatterDist {
 
 pub trait VtraceObj {
   fn intersect_bwd(&self, out_ray: Ray) -> Option<(Vector, f32)>;
+  fn normal_at(&self, x: Vector) -> Vector;
   fn boundary_surf_mat(&self) -> Rc<dyn SurfaceMat>;
   fn interior_vol_mat(&self) -> Rc<dyn VolumeMat>;
 }
@@ -238,12 +254,12 @@ pub struct SimpleVtraceScene {
 }
 
 impl VtraceScene for SimpleVtraceScene {
-  fn trace_bwd(&self, out_ray: Ray, vol_obj_id: Option<usize>, epsilon: f32) -> TraceEvent {
+  fn trace_bwd(&self, out_ray: Ray, this_obj_id: Option<usize>, epsilon: f32) -> TraceEvent {
     // TODO
     let mut ixns = Vec::new();
     for (id, obj) in self.objs.iter().enumerate() {
-      if let Some(this_id) = vol_obj_id {
-        if this_id == id {
+      if let Some(this_obj_id) = this_obj_id {
+        if this_obj_id == id {
           continue;
         }
       }
@@ -263,7 +279,7 @@ impl VtraceScene for SimpleVtraceScene {
 
   fn query_surf_rad_bwd(&self, out_ray: Ray, inc_obj_id: Option<usize>, ext_obj_id: Option<usize>, default_opts: QueryOpts) -> f32 {
     // TODO
-    // TODO: project the intersection to the surface.
+    // TODO: project the intersection to the surface?
     let inc_obj = match inc_obj_id {
       None => unimplemented!("querying objects by coordinates is not supported"),
       Some(id) => self.objs[id].clone(),
@@ -276,7 +292,7 @@ impl VtraceScene for SimpleVtraceScene {
     let inc_vol = inc_obj.interior_vol_mat();
     let ext_surf = ext_obj.boundary_surf_mat();
     let ext_vol = ext_obj.interior_vol_mat();
-    let interface = inc_vol.interface_at(&*ext_vol, out_ray.orig);
+    let interface = inc_vol.interface_at(&*ext_vol, out_ray.origin);
     let emit_rad = inc_surf.query_surf_emission(out_ray) + ext_surf.query_surf_emission(out_ray);
     let mc_est_rad = {
       let (do_mc, roulette_mc_norm) = if default_opts.roulette_term_p.is_none() {
@@ -287,17 +303,20 @@ impl VtraceScene for SimpleVtraceScene {
         (mc_u < mc_p, Some(mc_p))
       };
       if do_mc {
-        // FIXME: require incident normal.
-        let normal_dir = unimplemented!();
+        // FIXME: the average normal can fail if the two objects are particularly
+        // mismatched; want to also support just one normal dir.
+        let normal_dir = (0.5 * (-inc_obj.normal_at(out_ray.origin) + ext_obj.normal_at(out_ray.origin))).normalize();
         let recurs_mc_est = match interface.scatter_surf_bwd(out_ray.dir, normal_dir) {
           InterfaceEvent::Absorb => {
             0.0
           }
-          InterfaceEvent::Reflect(in_ray) => {
+          InterfaceEvent::Reflect(in_dir) => {
+            let in_ray = Ray{origin: out_ray.origin, dir: in_dir};
             let next_est_rad = self.query_vol_rad_bwd(in_ray, inc_obj_id, false, default_opts);
             next_est_rad
           }
-          InterfaceEvent::Transmit(in_ray) => {
+          InterfaceEvent::Transmit(in_dir) => {
+            let in_ray = Ray{origin: out_ray.origin, dir: in_dir};
             let next_est_rad = self.query_vol_rad_bwd(in_ray, ext_obj_id, false, default_opts);
             next_est_rad
           }
@@ -353,12 +372,12 @@ impl VtraceScene for SimpleVtraceScene {
             (0.0, None)
           }
           AttenuationEvent::Cutoff(..) => {
-            let out_src_ray = Ray{orig: surf_pt.unwrap(), dir: out_dst_ray.dir};
+            let out_src_ray = Ray{origin: surf_pt.unwrap(), dir: out_dst_ray.dir};
             let next_est_rad = self.query_surf_rad_bwd(out_src_ray, vol_obj_id, surf_obj_id, default_opts);
             (next_est_rad, None)
           }
           AttenuationEvent::Attenuate(p, dist) => {
-            let out_src_ray = Ray{orig: p, dir: out_dst_ray.dir};
+            let out_src_ray = Ray{origin: p, dir: out_dst_ray.dir};
             let next_est_rad = match this_vol.scatter_vol_bwd(out_src_ray) {
               ScatterEvent::Absorb => {
                 0.0
@@ -367,7 +386,7 @@ impl VtraceScene for SimpleVtraceScene {
                 self.query_vol_rad_bwd(in_ray, vol_obj_id, false, default_opts)
               }
             };
-            (next_est_rad, Some(this_vol.vol_extinction_coef_at(out_src_ray.orig)))
+            (next_est_rad, Some(this_vol.vol_extinction_coef_at(out_src_ray.origin)))
           }
         };
         let total_mc_norm = roulette_mc_norm.unwrap_or(1.0) * recurs_mc_norm.unwrap_or(1.0);

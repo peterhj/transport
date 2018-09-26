@@ -58,7 +58,7 @@ impl SourceDist for HemiPointSource {
     let z_axis = Vector3::new(0.0, 0.0, 1.0);
     let q = Quaternion::from_arc(z_axis, self.normal, None);
     let dir = q.rotate_vector(v).normalize();
-    (self.mag, Ray{orig: self.origin, dir})
+    (self.mag, Ray{origin: self.origin, dir})
   }
 }
 
