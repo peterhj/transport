@@ -1,6 +1,7 @@
 use ::geometry::*;
 
 use cgmath::*;
+use float::ord::*;
 use rand::prelude::*;
 use rand::distributions::{OpenClosed01, Standard, StandardNormal, Uniform};
 
@@ -25,16 +26,20 @@ pub enum InterfaceEvent {
 }
 
 pub trait InterfaceMat {
-  fn scatter_surf_bwd(&self, out_ray: Ray) -> InterfaceEvent;
+  fn scatter_surf_bwd(&self, inc_dir: Vector, inc_normal: Vector) -> InterfaceEvent;
 }
 
 pub struct DielectricDielectricInterfaceMatDef {
   // TODO
+  //inc_normal_dir:       Vector,
+  inc_refractive_index: f32,
+  ext_refractive_index: f32,
 }
 
 impl InterfaceMat for DielectricDielectricInterfaceMatDef {
-  fn scatter_surf_bwd(&self, out_ray: Ray) -> InterfaceEvent {
+  fn scatter_surf_bwd(&self, inc_dir: Vector, inc_normal: Vector) -> InterfaceEvent {
     // TODO
+    // TODO: Snell's and Fresnel's laws.
     unimplemented!();
   }
 }
@@ -72,11 +77,16 @@ pub trait VolumeMat {
   fn scatter_vol_bwd(&self, out_ray: Ray) -> ScatterEvent;
   fn query_vol_emission(&self, out_ray: Ray) -> f32;
 
-  fn interface_with(&self, other: &VolumeMat) -> Rc<dyn InterfaceMat> {
+  fn real_refractive_index_at(&self, x: Vector) -> Option<f32> {
+    None
+  }
+
+  fn interface_at(&self, other: &VolumeMat, x: Vector) -> Rc<dyn InterfaceMat> {
     match (self.mat_kind(), other.mat_kind()) {
       (VolumeMatKind::Dielectric, VolumeMatKind::Dielectric) => {
         Rc::new(DielectricDielectricInterfaceMatDef{
-          // TODO
+          inc_refractive_index: self.real_refractive_index_at(x).unwrap(),
+          ext_refractive_index: other.real_refractive_index_at(x).unwrap(),
         })
       }
     }
@@ -121,11 +131,51 @@ pub trait VolumeMat {
 
 #[derive(Clone)]
 pub struct HomogeneousDielectricVolumeMatDef {
-  //pub mat_kind:     VolumeMatKind,
   pub refractive_index: f32,
   pub absorb_coef:      f32,
   pub scatter_coef:     f32,
   pub scatter_dist:     Option<Rc<dyn HomogeneousScatterDist>>,
+}
+
+impl VolumeMat for HomogeneousDielectricVolumeMatDef {
+  fn mat_kind(&self) -> VolumeMatKind {
+    VolumeMatKind::Dielectric
+  }
+
+  fn vol_absorbing_coef_at(&self, x: Vector) -> f32 {
+    self.absorb_coef
+  }
+
+  fn vol_scattering_coef_at(&self, x: Vector) -> f32 {
+    self.scatter_coef
+  }
+
+  fn scatter_vol_bwd(&self, out_ray: Ray) -> ScatterEvent {
+    let a_coef = self.vol_absorbing_coef_at(out_ray.orig);
+    let total_coef = self.vol_extinction_coef_at(out_ray.orig);
+    let u: f32 = thread_rng().sample(Uniform::new(0.0, total_coef));
+    if u < a_coef {
+      ScatterEvent::Absorb
+    } else if u + a_coef < total_coef {
+      match self.scatter_dist {
+        None => unreachable!(),
+        Some(ref scatter_dist) => {
+          let in_dir = scatter_dist.sample_bwd(out_ray.dir);
+          ScatterEvent::Scatter(Ray{orig: out_ray.orig, dir: in_dir})
+        }
+      }
+    } else {
+      unreachable!();
+    }
+  }
+
+  fn query_vol_emission(&self, out_ray: Ray) -> f32 {
+    0.0
+  }
+
+  fn real_refractive_index_at(&self, x: Vector) -> Option<f32> {
+    Some(self.refractive_index)
+  }
 }
 
 pub trait HomogeneousScatterDist {
@@ -152,6 +202,18 @@ impl HomogeneousScatterDist for HGScatterDist {
   }
 }
 
+pub trait VtraceObj {
+  fn intersect_bwd(&self, out_ray: Ray) -> Option<(Vector, f32)>;
+  fn boundary_surf_mat(&self) -> Rc<dyn SurfaceMat>;
+  fn interior_vol_mat(&self) -> Rc<dyn VolumeMat>;
+}
+
+pub struct SphereObj {
+}
+
+pub struct QuadObj {
+}
+
 #[derive(Clone, Copy)]
 pub enum TraceEvent {
   NonTerm,
@@ -160,17 +222,13 @@ pub enum TraceEvent {
 
 #[derive(Clone, Copy)]
 pub struct QueryOpts {
+  pub trace_epsilon:    f32,
   pub importance_clip:  Option<f32>,
   pub roulette_term_p:  Option<f32>,
 }
 
-pub trait VtraceObj {
-  fn boundary_surf_mat(&self) -> Rc<dyn SurfaceMat>;
-  fn interior_vol_mat(&self) -> Rc<dyn VolumeMat>;
-}
-
 pub trait VtraceScene {
-  fn trace_bwd(&self, out_ray: Ray, obj_id: Option<usize>) -> TraceEvent;
+  fn trace_bwd(&self, out_ray: Ray, obj_id: Option<usize>, epsilon: f32) -> TraceEvent;
   fn query_surf_rad_bwd(&self, out_ray: Ray, inc_obj_id: Option<usize>, ext_obj_id: Option<usize>, default_opts: QueryOpts) -> f32;
   fn query_vol_rad_bwd(&self, out_ray: Ray, obj_id: Option<usize>, top_level: bool, /*top_level_opts: Option<QueryOpts>,*/ default_opts: QueryOpts) -> f32;
 }
@@ -180,14 +238,32 @@ pub struct SimpleVtraceScene {
 }
 
 impl VtraceScene for SimpleVtraceScene {
-  fn trace_bwd(&self, out_ray: Ray, obj_id: Option<usize>) -> TraceEvent {
+  fn trace_bwd(&self, out_ray: Ray, vol_obj_id: Option<usize>, epsilon: f32) -> TraceEvent {
     // TODO
-    unimplemented!();
+    let mut ixns = Vec::new();
+    for (id, obj) in self.objs.iter().enumerate() {
+      if let Some(this_id) = vol_obj_id {
+        if this_id == id {
+          continue;
+        }
+      }
+      if let Some((ixn_pt, ixn_dist)) = obj.intersect_bwd(out_ray) {
+        if ixn_dist > epsilon {
+          ixns.push((id, ixn_pt, ixn_dist));
+        }
+      }
+    }
+    if ixns.is_empty() {
+      TraceEvent::NonTerm
+    } else {
+      ixns.sort_unstable_by_key(|(_, _, t)| F32SupNan(*t));
+      TraceEvent::Surface(ixns[0].1, ixns[0].2, Some(ixns[0].0))
+    }
   }
 
   fn query_surf_rad_bwd(&self, out_ray: Ray, inc_obj_id: Option<usize>, ext_obj_id: Option<usize>, default_opts: QueryOpts) -> f32 {
     // TODO
-    // TODO: project the intersection to the surface;
+    // TODO: project the intersection to the surface.
     let inc_obj = match inc_obj_id {
       None => unimplemented!("querying objects by coordinates is not supported"),
       Some(id) => self.objs[id].clone(),
@@ -200,7 +276,7 @@ impl VtraceScene for SimpleVtraceScene {
     let inc_vol = inc_obj.interior_vol_mat();
     let ext_surf = ext_obj.boundary_surf_mat();
     let ext_vol = ext_obj.interior_vol_mat();
-    let interface = inc_vol.interface_with(&*ext_vol);
+    let interface = inc_vol.interface_at(&*ext_vol, out_ray.orig);
     let emit_rad = inc_surf.query_surf_emission(out_ray) + ext_surf.query_surf_emission(out_ray);
     let mc_est_rad = {
       let (do_mc, roulette_mc_norm) = if default_opts.roulette_term_p.is_none() {
@@ -211,7 +287,9 @@ impl VtraceScene for SimpleVtraceScene {
         (mc_u < mc_p, Some(mc_p))
       };
       if do_mc {
-        let recurs_mc_est = match interface.scatter_surf_bwd(out_ray) {
+        // FIXME: require incident normal.
+        let normal_dir = unimplemented!();
+        let recurs_mc_est = match interface.scatter_surf_bwd(out_ray.dir, normal_dir) {
           InterfaceEvent::Absorb => {
             0.0
           }
@@ -247,7 +325,7 @@ impl VtraceScene for SimpleVtraceScene {
 
   fn query_vol_rad_bwd(&self, out_dst_ray: Ray, vol_obj_id: Option<usize>, top_level: bool, default_opts: QueryOpts) -> f32 {
     // TODO
-    let (surf_cutoff_dist, surf_pt, surf_obj_id) = match self.trace_bwd(out_dst_ray, vol_obj_id) {
+    let (surf_cutoff_dist, surf_pt, surf_obj_id) = match self.trace_bwd(out_dst_ray, vol_obj_id, default_opts.trace_epsilon) {
       TraceEvent::NonTerm => {
         (None, None, None)
       }
