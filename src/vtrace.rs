@@ -2,10 +2,11 @@ use ::geometry::*;
 
 use cgmath::*;
 use float::ord::*;
+use memarray::*;
 use rand::prelude::*;
 use rand::distributions::{OpenClosed01, Standard, StandardNormal, Uniform};
 
-use std::f32::consts::{PI};
+use std::f32::consts::{PI, FRAC_2_PI};
 use std::rc::{Rc};
 
 fn clip_radian(mut t: f32) -> f32 {
@@ -60,11 +61,31 @@ impl InterfaceMat for DielectricDielectricInterfaceMatDef {
 }
 
 pub trait SurfaceMat {
-  fn query_surf_emission(&self, out_ray: Ray) -> f32;
+  fn query_surf_emission(&self, out_ray: Ray, normal: Vector) -> f32;
 }
 
 #[derive(Default)]
 pub struct InvisibleSurfaceMatDef {
+}
+
+impl SurfaceMat for InvisibleSurfaceMatDef {
+  fn query_surf_emission(&self, out_ray: Ray, normal: Vector) -> f32 {
+    0.0
+  }
+}
+
+pub struct HemisphericLightSurfaceMatDef {
+  pub emit_rad: f32,
+}
+
+impl SurfaceMat for HemisphericLightSurfaceMatDef {
+  fn query_surf_emission(&self, out_ray: Ray, normal: Vector) -> f32 {
+    if out_ray.dir.dot(normal) > 0.0 {
+      self.emit_rad
+    } else {
+      0.0
+    }
+  }
 }
 
 #[derive(Clone, Copy)]
@@ -100,8 +121,14 @@ pub trait VolumeMat {
     match (self.mat_kind(), other.mat_kind()) {
       (VolumeMatKind::Dielectric, VolumeMatKind::Dielectric) => {
         Rc::new(DielectricDielectricInterfaceMatDef{
-          inc_refractive_index: self.real_refractive_index_at(x).unwrap(),
-          ext_refractive_index: other.real_refractive_index_at(x).unwrap(),
+          inc_refractive_index: match self.real_refractive_index_at(x) {
+            None => panic!("dielectric interface missing incident real refractive index"),
+            Some(index) => index,
+          },
+          ext_refractive_index: match other.real_refractive_index_at(x) {
+            None => panic!("dielectric interface missing external real refractive index"),
+            Some(index) => index,
+          },
         })
       }
     }
@@ -128,7 +155,6 @@ pub trait VolumeMat {
     let mut s = 0.0;
     loop {
       let u1: f32 = thread_rng().sample(OpenClosed01);
-      let u2: f32 = thread_rng().sample(Standard);
       s -= u1.ln();
       xp = out_ray.origin - s * out_ray.dir / max_coef;
       if let Some(cutoff_s) = cutoff_s {
@@ -136,11 +162,41 @@ pub trait VolumeMat {
           return AttenuationEvent::Cutoff(xp, s / max_coef);
         }
       }
+      let u2: f32 = thread_rng().sample(Standard);
       if u2 * max_coef < self.vol_extinction_coef_at(xp) {
         break;
       }
     }
     AttenuationEvent::Attenuate(xp, s / max_coef)
+  }
+}
+
+pub struct EmptyVolumeMatDef {
+}
+
+impl VolumeMat for EmptyVolumeMatDef {
+  fn mat_kind(&self) -> VolumeMatKind {
+    VolumeMatKind::Dielectric
+  }
+
+  fn vol_absorbing_coef_at(&self, x: Vector) -> f32 {
+    0.0
+  }
+
+  fn vol_scattering_coef_at(&self, x: Vector) -> f32 {
+    0.0
+  }
+
+  fn scatter_vol_bwd(&self, out_ray: Ray) -> ScatterEvent {
+    unreachable!();
+  }
+
+  fn query_vol_emission(&self, out_ray: Ray) -> f32 {
+    0.0
+  }
+
+  fn real_refractive_index_at(&self, x: Vector) -> Option<f32> {
+    Some(0.0)
   }
 }
 
@@ -218,16 +274,198 @@ impl HomogeneousScatterDist for HGScatterDist {
 }
 
 pub trait VtraceObj {
-  fn intersect_bwd(&self, out_ray: Ray) -> Option<(Vector, f32)>;
-  fn normal_at(&self, x: Vector) -> Vector;
+  fn intersect_bwd(&self, out_ray: Ray, epsilon: f32) -> Option<(Vector, f32)>;
+  fn normal_at(&self, x: Vector) -> Option<Vector>;
+  fn project(&self, x: Vector) -> Vector;
   fn boundary_surf_mat(&self) -> Rc<dyn SurfaceMat>;
   fn interior_vol_mat(&self) -> Rc<dyn VolumeMat>;
 }
 
+pub struct SpaceObj {
+  boundary_mat: Rc<InvisibleSurfaceMatDef>,
+  interior_mat: Rc<dyn VolumeMat>,
+}
+
+impl SpaceObj {
+  pub fn new(interior_mat: Rc<dyn VolumeMat>) -> Self {
+    SpaceObj{
+      boundary_mat: Rc::new(InvisibleSurfaceMatDef{}),
+      interior_mat,
+    }
+  }
+}
+
+impl VtraceObj for SpaceObj {
+  fn intersect_bwd(&self, out_ray: Ray, epsilon: f32) -> Option<(Vector, f32)> {
+    None
+  }
+
+  fn normal_at(&self, x: Vector) -> Option<Vector> {
+    None
+  }
+
+  fn project(&self, x: Vector) -> Vector {
+    x
+  }
+
+  fn boundary_surf_mat(&self) -> Rc<dyn SurfaceMat> {
+    self.boundary_mat.clone()
+  }
+
+  fn interior_vol_mat(&self) -> Rc<dyn VolumeMat> {
+    self.interior_mat.clone()
+  }
+}
+
 pub struct SphereObj {
+  center:       Vector,
+  radius:       f32,
+  boundary_mat: Rc<dyn SurfaceMat>,
+  interior_mat: Rc<dyn VolumeMat>,
+}
+
+impl VtraceObj for SphereObj {
+  fn intersect_bwd(&self, out_ray: Ray, epsilon: f32) -> Option<(Vector, f32)> {
+    // TODO
+    unimplemented!();
+  }
+
+  fn normal_at(&self, x: Vector) -> Option<Vector> {
+    // TODO
+    unimplemented!();
+  }
+
+  fn project(&self, x: Vector) -> Vector {
+    // TODO
+    unimplemented!();
+  }
+
+  fn boundary_surf_mat(&self) -> Rc<dyn SurfaceMat> {
+    self.boundary_mat.clone()
+  }
+
+  fn interior_vol_mat(&self) -> Rc<dyn VolumeMat> {
+    self.interior_mat.clone()
+  }
 }
 
 pub struct QuadObj {
+  // TODO: specify normal.
+  v00:  Vector,
+  v01:  Vector,
+  v10:  Vector,
+  v11:  Vector,
+  boundary_mat: Rc<dyn SurfaceMat>,
+  interior_mat: Rc<EmptyVolumeMatDef>,
+}
+
+impl VtraceObj for QuadObj {
+  fn intersect_bwd(&self, out_ray: Ray, epsilon: f32) -> Option<(Vector, f32)> {
+    // TODO
+    let d = -out_ray.dir;
+    let e01 = self.v10 - self.v00;
+    let e03 = self.v01 - self.v00;
+    let p = d.cross(e03);
+    let det = e01.dot(p);
+    if det.abs() < epsilon {
+      return None;
+    }
+    let t = out_ray.origin - self.v00;
+    let a = t.dot(p) / det;
+    if a < 0.0 || a > 1.0 {
+      return None;
+    }
+    let q = t.cross(e01);
+    let b = d.dot(q) / det;
+    if b < 0.0 || b > 1.0 {
+      return None;
+    }
+
+    if (a + b) > 1.0 {
+      let e23 = self.v01 - self.v11;
+      let e21 = self.v10 - self.v11;
+      let pp = d.cross(e21);
+      let detp = e23.dot(pp);
+      if detp.abs() < epsilon {
+        return None;
+      }
+      let tp = out_ray.origin - self.v11;
+      let ap = tp.dot(pp) / detp;
+      if ap < 0.0 {
+        return None;
+      }
+      let qp = tp.cross(e23);
+      let bp = d.dot(qp) / detp;
+      if bp < 0.0 {
+        return None;
+      }
+    }
+
+    let t = e03.dot(q) / det;
+    if t < 0.0 {
+      return None;
+    }
+
+    /*let (a11, b11) = {
+      // TODO: calculate barycentric coordinates.
+      let e02 = self.v11 - self.v00;
+      let n = e01.cross(e03);
+      if n.x.abs() >= n.y.abs() && n.x.abs() >= n.z.abs() {
+        let a11 = (e02.y * e03.z - e02.z * e03.y) / n.x;
+        let b11 = (e01.y * e02.z - e01.z * e02.y) / n.x;
+        (a11, b11)
+      } else if n.y.abs() >= n.x.abs() && n.y.abs() >= n.z.abs() {
+        let a11 = (e02.z * e03.x - e02.x * e03.z) / n.y;
+        let b11 = (e01.z * e02.x - e01.x * e02.z) / n.y;
+        (a11, b11)
+      } else {
+        let a11 = (e02.x * e03.y - e02.y * e03.x) / n.z;
+        let b11 = (e01.x * e02.y - e01.y * e02.x) / n.z;
+        (a11, b11)
+      }
+    };*/
+
+    /*let (u, v) = {
+      // TODO: calculate bilinear coordinates.
+      if (a11 - 1.0).abs() < epsilon {
+        let u = a;
+        let v = if (b11 - 1.0).abs() < epsilon {
+          b
+        } else {
+          b / (u * (b11 - 1.0) + 1.0)
+        };
+        (u, v)
+      } else if (b11 - 1.0).abs() < epsilon {
+        let v = b;
+        let u = a / (v * (a11 - 1.0) + 1.0);
+        (u, v)
+      } else {
+        // TODO
+        unimplemented!();
+      }
+    };*/
+
+    let ixn_pt = self.v00 + a * e01 + b * e03;
+    Some((ixn_pt, t))
+  }
+
+  fn normal_at(&self, x: Vector) -> Option<Vector> {
+    // TODO
+    unimplemented!();
+  }
+
+  fn project(&self, x: Vector) -> Vector {
+    // TODO
+    unimplemented!();
+  }
+
+  fn boundary_surf_mat(&self) -> Rc<dyn SurfaceMat> {
+    self.boundary_mat.clone()
+  }
+
+  fn interior_vol_mat(&self) -> Rc<dyn VolumeMat> {
+    self.interior_mat.clone()
+  }
 }
 
 #[derive(Clone, Copy)]
@@ -237,16 +475,34 @@ pub enum TraceEvent {
 }
 
 #[derive(Clone, Copy)]
+pub enum Fov {
+  Degrees(f32),
+  HalfTangent(f32),
+}
+
+#[derive(Clone, Copy)]
 pub struct QueryOpts {
   pub trace_epsilon:    f32,
   pub importance_clip:  Option<f32>,
   pub roulette_term_p:  Option<f32>,
 }
 
+#[derive(Clone, Copy)]
+pub struct RenderOpts {
+  pub cam_orig:     Vector,
+  pub cam_lookat:   Vector,
+  pub cam_fov:      Fov,
+  pub image_width:  usize,
+  pub image_height: usize,
+  //pub rays_per_pix: usize,
+}
+
 pub trait VtraceScene {
   fn trace_bwd(&self, out_ray: Ray, obj_id: Option<usize>, epsilon: f32) -> TraceEvent;
   fn query_surf_rad_bwd(&self, out_ray: Ray, inc_obj_id: Option<usize>, ext_obj_id: Option<usize>, default_opts: QueryOpts) -> f32;
   fn query_vol_rad_bwd(&self, out_ray: Ray, obj_id: Option<usize>, top_level: bool, /*top_level_opts: Option<QueryOpts>,*/ default_opts: QueryOpts) -> f32;
+  fn render_depth(&self, render_opts: RenderOpts, buf: &mut MemArray3d<u8>);
+  fn render_rad(&self, render_opts: RenderOpts, buf: &mut MemArray3d<u8>);
 }
 
 pub struct SimpleVtraceScene {
@@ -263,7 +519,7 @@ impl VtraceScene for SimpleVtraceScene {
           continue;
         }
       }
-      if let Some((ixn_pt, ixn_dist)) = obj.intersect_bwd(out_ray) {
+      if let Some((ixn_pt, ixn_dist)) = obj.intersect_bwd(out_ray, epsilon) {
         if ixn_dist > epsilon {
           ixns.push((id, ixn_pt, ixn_dist));
         }
@@ -293,7 +549,13 @@ impl VtraceScene for SimpleVtraceScene {
     let ext_surf = ext_obj.boundary_surf_mat();
     let ext_vol = ext_obj.interior_vol_mat();
     let interface = inc_vol.interface_at(&*ext_vol, out_ray.origin);
-    let emit_rad = inc_surf.query_surf_emission(out_ray) + ext_surf.query_surf_emission(out_ray);
+    let normal_dir = match (inc_obj.normal_at(out_ray.origin), ext_obj.normal_at(out_ray.origin)) {
+      (None,                None)               => panic!(),
+      (Some(inc_normal),    None)               => -inc_normal,
+      (None,                Some(ext_normal))   => ext_normal,
+      (Some(inc_normal),    Some(ext_normal))   => 0.5 * (-inc_normal + ext_normal),
+    };
+    let emit_rad = inc_surf.query_surf_emission(out_ray, -normal_dir) + ext_surf.query_surf_emission(out_ray, normal_dir);
     let mc_est_rad = {
       let (do_mc, roulette_mc_norm) = if default_opts.roulette_term_p.is_none() {
         (true, None)
@@ -303,9 +565,6 @@ impl VtraceScene for SimpleVtraceScene {
         (mc_u < mc_p, Some(mc_p))
       };
       if do_mc {
-        // FIXME: the average normal can fail if the two objects are particularly
-        // mismatched; want to also support just one normal dir.
-        let normal_dir = (0.5 * (-inc_obj.normal_at(out_ray.origin) + ext_obj.normal_at(out_ray.origin))).normalize();
         let recurs_mc_est = match interface.scatter_surf_bwd(out_ray.dir, normal_dir) {
           InterfaceEvent::Absorb => {
             0.0
@@ -408,5 +667,56 @@ impl VtraceScene for SimpleVtraceScene {
     };
     let this_rad = emit_rad + mc_est_rad;
     this_rad
+  }
+
+  fn render_depth(&self, render_opts: RenderOpts, buf: &mut MemArray3d<u8>) {
+    // TODO
+    let mut flat_buf = buf.flat_view_mut().unwrap();
+    let flat_buf = flat_buf.as_mut_slice();
+
+    let aspect_ratio = render_opts.image_height as f32 / render_opts.image_width as f32;
+    let camera_width = 1.0;
+    let camera_height = aspect_ratio;
+    let camera_depth = match render_opts.cam_fov {
+      Fov::Degrees(_) => unimplemented!(),
+      Fov::HalfTangent(t) => 0.5 * camera_width / t,
+    };
+    let camera_dir = (render_opts.cam_lookat - render_opts.cam_orig).normalize();
+    let camera_reldir = Vector::new(0.0, 0.0, 1.0);
+    let rel_to_world = Quaternion::from_arc(camera_reldir, camera_dir, None);
+    let camera_orig = render_opts.cam_orig;
+
+    let camera_inc_u = camera_width / render_opts.image_width as f32;
+    let camera_inc_v = camera_height / render_opts.image_height as f32;
+    let epsilon = 1.0e-6;
+
+    for screen_v in 0 .. render_opts.image_height {
+      for screen_u in 0 .. render_opts.image_width {
+        let camera_u = -0.5 * camera_width + (0.5 + screen_u as f32) * camera_inc_u;
+        let camera_v = -0.5 * camera_height + (0.5 + screen_v as f32) * camera_inc_v;
+        let camera_w = camera_depth;
+        let camera_relp = Vector3{x: camera_u, y: camera_v, z: camera_w}.normalize();
+        let camera_p = rel_to_world.rotate_vector(camera_relp).normalize();
+        let ray = Ray{origin: camera_orig, dir: camera_p};
+        let depth = match self.trace_bwd(ray, Some(0), epsilon) {
+          TraceEvent::NonTerm => {
+            1.0 / 0.0
+          }
+          TraceEvent::Surface(ixn_pt, depth, _) => {
+            depth
+          }
+        };
+        let pix_soft_val = (depth).atan() * FRAC_2_PI;
+        let pix_val: u8 = ((1.0 - pix_soft_val.max(0.0).min(1.0).powf(2.2)) * 255.0).round() as u8;
+        flat_buf[0 + 3 * (screen_u + render_opts.image_width * screen_v)] = pix_val;
+        flat_buf[1 + 3 * (screen_u + render_opts.image_width * screen_v)] = pix_val;
+        flat_buf[2 + 3 * (screen_u + render_opts.image_width * screen_v)] = pix_val;
+      }
+    }
+  }
+
+  fn render_rad(&self, render_opts: RenderOpts, buf: &mut MemArray3d<u8>) {
+    // TODO
+    unimplemented!();
   }
 }
