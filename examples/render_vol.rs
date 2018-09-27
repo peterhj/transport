@@ -23,17 +23,24 @@ fn main() {
       Vector3::new(0.23, 1.58, -0.22),
       Vector3::new(0.23, 1.58, 0.16),
   ], Rc::new(HemisphericLightSurfaceMatDef{emit_rad: 1.0})));
+  /*let sphere_obj = Rc::new(SphereObj::new(vec![
+  ], Rc::new()));*/
 
   let mut scene = SimpleVtraceScene::new(root_obj);
   scene.add_object(light_obj);
 
   let render_opts = RenderOpts{
-    cam_origin: Vector3::new(0.0, 1.0, 5.0),
-    cam_lookat: Vector3::new(0.0, 1.0, 4.0),
+    cam_origin: Vector3::new(0.0, 0.92, 5.4),
+    cam_lookat: Vector3::new(0.0, 0.89, 4.4),
     cam_up:     Vector3::new(0.0, 1.0, 0.0),
     cam_fov:    Fov::Tangent(0.25),
     im_width:   640,
     im_height:  640,
+    //rays_per_pix:   1,
+    rays_per_pix:   10,
+    //rays_per_pix:   100,
+    //rays_per_pix:   1000,
+    //rays_per_pix:   10000,
   };
   let mut buf = MemArray3d::<u8>::zeros([3, 640, 640]);
   scene.render_depth(render_opts, &mut buf);

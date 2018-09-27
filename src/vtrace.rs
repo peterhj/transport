@@ -511,7 +511,7 @@ pub struct RenderOpts {
   pub cam_fov:      Fov,
   pub im_width:     usize,
   pub im_height:    usize,
-  //pub rays_per_pix: usize,
+  pub rays_per_pix: usize,
 }
 
 pub trait VtraceScene {
@@ -712,11 +712,16 @@ impl VtraceScene for SimpleVtraceScene {
       Fov::Tangent(t) => 0.5 * camera_width / t,
     };
 
-    // FIXME: should also rotate in the camera plane to preserve "up".
+    // The camera relative coords are specified so that "z" is towards the
+    // viewer, and "x" and "y" follow the geometric convention on screen.
     let camera_dir = (render_opts.cam_lookat - render_opts.cam_origin).normalize();
-    let camera_reldir = Vector::new(0.0, 0.0, 1.0);
-    let rel_to_world = Quaternion::from_arc(camera_reldir, camera_dir, None);
-    let camera_origin = render_opts.cam_origin;
+    let camera_reldir = Vector::new(0.0, 0.0, -1.0);
+    let camera_relup = Vector::new(0.0, 1.0, 0.0);
+    let dir_rd2a_tfm = Quaternion::from_arc(camera_reldir, camera_dir, None);
+    let dir_a2rd_tfm = Quaternion::from_arc(camera_dir, camera_reldir, None);
+    let camera_relup_rd = dir_a2rd_tfm.rotate_vector(render_opts.cam_up).normalize();
+    let up_r2rd_tfm = Quaternion::from_arc(camera_relup, camera_relup_rd, None);
+    let rel_to_world = up_r2rd_tfm * dir_rd2a_tfm;
 
     let camera_inc_u = camera_width / render_opts.im_width as f32;
     let camera_inc_v = camera_height / render_opts.im_height as f32;
@@ -724,13 +729,13 @@ impl VtraceScene for SimpleVtraceScene {
 
     for screen_v in 0 .. render_opts.im_height {
       for screen_u in 0 .. render_opts.im_width {
-        // TODO: the ray must point toward the camera.
+        // The ray is defined to point toward the camera.
         let camera_u = -0.5 * camera_width + (0.5 + screen_u as f32) * camera_inc_u;
         let camera_v = -0.5 * camera_height + (0.5 + screen_v as f32) * camera_inc_v;
-        let camera_w = -camera_depth;
+        let camera_w = camera_depth;
         let camera_relp = Vector3{x: camera_u, y: camera_v, z: camera_w}.normalize();
         let camera_p = rel_to_world.rotate_vector(camera_relp).normalize();
-        let out_ray = Ray{origin: camera_origin, dir: camera_p};
+        let out_ray = Ray{origin: render_opts.cam_origin, dir: camera_p};
         let depth = match self.trace_bwd(out_ray, Some(0), epsilon) {
           TraceEvent::NonTerm => {
             1.0 / 0.0
