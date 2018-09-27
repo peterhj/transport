@@ -171,10 +171,11 @@ pub trait VolumeMat {
   }
 }
 
-pub struct EmptyVolumeMatDef {
+#[derive(Default)]
+pub struct VacuumVolumeMatDef {
 }
 
-impl VolumeMat for EmptyVolumeMatDef {
+impl VolumeMat for VacuumVolumeMatDef {
   fn mat_kind(&self) -> VolumeMatKind {
     VolumeMatKind::Dielectric
   }
@@ -356,12 +357,26 @@ pub struct QuadObj {
   v10:  Vector,
   v11:  Vector,
   boundary_mat: Rc<dyn SurfaceMat>,
-  interior_mat: Rc<EmptyVolumeMatDef>,
+  interior_mat: Rc<VacuumVolumeMatDef>,
+}
+
+impl QuadObj {
+  pub fn new(vs: Vec<Vector>, boundary_mat: Rc<dyn SurfaceMat>) -> Self {
+    QuadObj{
+      v00:  vs[0],
+      v01:  vs[1],
+      v10:  vs[2],
+      v11:  vs[3],
+      boundary_mat: boundary_mat,
+      interior_mat: Rc::new(VacuumVolumeMatDef::default()),
+    }
+  }
 }
 
 impl VtraceObj for QuadObj {
   fn intersect_bwd(&self, out_ray: Ray, epsilon: f32) -> Option<(Vector, f32)> {
     // TODO
+    //println!("DEBUG: QuadObj: intersect_bwd: {:?}", epsilon);
     let d = -out_ray.dir;
     let e01 = self.v10 - self.v00;
     let e03 = self.v01 - self.v00;
@@ -477,7 +492,8 @@ pub enum TraceEvent {
 #[derive(Clone, Copy)]
 pub enum Fov {
   Degrees(f32),
-  HalfTangent(f32),
+  Radians(f32),
+  Tangent(f32),
 }
 
 #[derive(Clone, Copy)]
@@ -489,11 +505,12 @@ pub struct QueryOpts {
 
 #[derive(Clone, Copy)]
 pub struct RenderOpts {
-  pub cam_orig:     Vector,
+  pub cam_origin:   Vector,
   pub cam_lookat:   Vector,
+  pub cam_up:       Vector,
   pub cam_fov:      Fov,
-  pub image_width:  usize,
-  pub image_height: usize,
+  pub im_width:     usize,
+  pub im_height:    usize,
   //pub rays_per_pix: usize,
 }
 
@@ -507,6 +524,18 @@ pub trait VtraceScene {
 
 pub struct SimpleVtraceScene {
   objs: Vec<Rc<dyn VtraceObj>>,
+}
+
+impl SimpleVtraceScene {
+  pub fn new(root_obj: Rc<dyn VtraceObj>) -> Self {
+    SimpleVtraceScene{
+      objs: vec![root_obj],
+    }
+  }
+
+  pub fn add_object(&mut self, obj: Rc<dyn VtraceObj>) {
+    self.objs.push(obj);
+  }
 }
 
 impl VtraceScene for SimpleVtraceScene {
@@ -674,43 +703,48 @@ impl VtraceScene for SimpleVtraceScene {
     let mut flat_buf = buf.flat_view_mut().unwrap();
     let flat_buf = flat_buf.as_mut_slice();
 
-    let aspect_ratio = render_opts.image_height as f32 / render_opts.image_width as f32;
+    let aspect_ratio = render_opts.im_height as f32 / render_opts.im_width as f32;
     let camera_width = 1.0;
     let camera_height = aspect_ratio;
     let camera_depth = match render_opts.cam_fov {
       Fov::Degrees(_) => unimplemented!(),
-      Fov::HalfTangent(t) => 0.5 * camera_width / t,
+      Fov::Radians(_) => unimplemented!(),
+      Fov::Tangent(t) => 0.5 * camera_width / t,
     };
-    let camera_dir = (render_opts.cam_lookat - render_opts.cam_orig).normalize();
+
+    // FIXME: should also rotate in the camera plane to preserve "up".
+    let camera_dir = (render_opts.cam_lookat - render_opts.cam_origin).normalize();
     let camera_reldir = Vector::new(0.0, 0.0, 1.0);
     let rel_to_world = Quaternion::from_arc(camera_reldir, camera_dir, None);
-    let camera_orig = render_opts.cam_orig;
+    let camera_origin = render_opts.cam_origin;
 
-    let camera_inc_u = camera_width / render_opts.image_width as f32;
-    let camera_inc_v = camera_height / render_opts.image_height as f32;
+    let camera_inc_u = camera_width / render_opts.im_width as f32;
+    let camera_inc_v = camera_height / render_opts.im_height as f32;
     let epsilon = 1.0e-6;
 
-    for screen_v in 0 .. render_opts.image_height {
-      for screen_u in 0 .. render_opts.image_width {
+    for screen_v in 0 .. render_opts.im_height {
+      for screen_u in 0 .. render_opts.im_width {
+        // TODO: the ray must point toward the camera.
         let camera_u = -0.5 * camera_width + (0.5 + screen_u as f32) * camera_inc_u;
         let camera_v = -0.5 * camera_height + (0.5 + screen_v as f32) * camera_inc_v;
-        let camera_w = camera_depth;
+        let camera_w = -camera_depth;
         let camera_relp = Vector3{x: camera_u, y: camera_v, z: camera_w}.normalize();
         let camera_p = rel_to_world.rotate_vector(camera_relp).normalize();
-        let ray = Ray{origin: camera_orig, dir: camera_p};
-        let depth = match self.trace_bwd(ray, Some(0), epsilon) {
+        let out_ray = Ray{origin: camera_origin, dir: camera_p};
+        let depth = match self.trace_bwd(out_ray, Some(0), epsilon) {
           TraceEvent::NonTerm => {
             1.0 / 0.0
           }
           TraceEvent::Surface(ixn_pt, depth, _) => {
+            //println!("DEBUG: render_depth: hit surface");
             depth
           }
         };
         let pix_soft_val = (depth).atan() * FRAC_2_PI;
         let pix_val: u8 = ((1.0 - pix_soft_val.max(0.0).min(1.0).powf(2.2)) * 255.0).round() as u8;
-        flat_buf[0 + 3 * (screen_u + render_opts.image_width * screen_v)] = pix_val;
-        flat_buf[1 + 3 * (screen_u + render_opts.image_width * screen_v)] = pix_val;
-        flat_buf[2 + 3 * (screen_u + render_opts.image_width * screen_v)] = pix_val;
+        flat_buf[0 + 3 * (screen_u + render_opts.im_width * screen_v)] = pix_val;
+        flat_buf[1 + 3 * (screen_u + render_opts.im_width * screen_v)] = pix_val;
+        flat_buf[2 + 3 * (screen_u + render_opts.im_width * screen_v)] = pix_val;
       }
     }
   }
