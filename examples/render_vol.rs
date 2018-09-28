@@ -29,16 +29,16 @@ fn main() {
   ], Rc::new(SphericalLightSurfaceMatDef{emit_rad: 1.0})));
   //], Rc::new(HemisphericalLightSurfaceMatDef{emit_rad: 1.0})));
   let floor_obj = Rc::new(QuadObj::new(vec![
-      Vector3::new(-2.0, 0.0, -2.0),
+      /*Vector3::new(-2.0, 0.0, -2.0),
       Vector3::new(-2.0, 0.0, 2.0),
       Vector3::new(2.0, 0.0, -2.0),
-      Vector3::new(2.0, 0.0, 2.0),
-      /*Vector3::new(-0.99, 0.0, -1.04),
+      Vector3::new(2.0, 0.0, 2.0),*/
+      Vector3::new(-0.99, 0.0, -1.04),
       Vector3::new(-1.01, 0.0, 0.99),
       Vector3::new(1.0, 0.0, -1.04),
-      Vector3::new(1.0, 0.0, 0.99),*/
+      Vector3::new(1.0, 0.0, 0.99),
   //], Rc::new(LambertianSurfaceMatDef{absorb_prob: 0.0})));
-  ], Rc::new(SpecularSurfaceMatDef{absorb_prob: 0.0})));
+  ], Rc::new(MirrorSurfaceMatDef{absorb_prob: 0.0})));
   let leftwall_obj = Rc::new(QuadObj::new(vec![
       Vector3::new(-1.02, 1.59, -1.04),
       Vector3::new(-1.02, 1.59, 0.99),
@@ -55,10 +55,10 @@ fn main() {
   ], Rc::new()));*/
   let sphere1_obj = Rc::new(SphereObj::new(
       Vector3::new(-0.42, 0.33, -0.28), 0.33,
-      Rc::new(SpecularSurfaceMatDef{absorb_prob: 0.0})));
+      Rc::new(MirrorSurfaceMatDef{absorb_prob: 0.0})));
   let sphere2_obj = Rc::new(SphereObj::new(
       Vector3::new(0.45, 0.33, 0.38), 0.33,
-      Rc::new(SpecularSurfaceMatDef{absorb_prob: 0.0})));
+      Rc::new(MirrorSurfaceMatDef{absorb_prob: 0.0})));
 
   let mut scene = SimpleVtraceScene::new(root_obj);
   scene.add_object(light_obj);

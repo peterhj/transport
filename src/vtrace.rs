@@ -19,6 +19,15 @@ fn clip_radian(mut t: f32) -> f32 {
   t
 }
 
+fn linear2srgb(linear: f32) -> f32 {
+  // See: <https://github.com/nothings/stb/issues/588>.
+  (if linear <= 0.0031308 {
+    12.92 * linear
+  } else {
+    1.055 * linear.powf(1.0 / 2.4) - 0.055
+  }).max(0.0).min(1.0)
+}
+
 #[derive(Clone, Copy)]
 pub enum InterfaceEvent {
   Absorb,
@@ -52,22 +61,18 @@ pub fn interface_at(
         absorb_prob:    0.0,
       })
     }
-    (SurfaceMatKind::PassThrough, _, SurfaceMatKind::Specular, _) => {
+    (SurfaceMatKind::PassThrough, _, SurfaceMatKind::Mirror, _) => {
       // TODO
-      Rc::new(SpecularInterfaceMatDef{
+      Rc::new(MirrorInterfaceMatDef{
         absorb_prob:    0.0,
       })
     }
-    (SurfaceMatKind::Specular, _, SurfaceMatKind::PassThrough, _) => {
+    (SurfaceMatKind::Mirror, _, SurfaceMatKind::PassThrough, _) => {
       // TODO
-      Rc::new(SpecularInterfaceMatDef{
+      Rc::new(MirrorInterfaceMatDef{
         absorb_prob:    0.0,
       })
     }
-    /*(SurfaceMatKind::Specular, VolumeMatKind::Unspecified, SurfaceMatKind::Specular, VolumeMatKind::Unspecified) => {
-      // TODO
-      unimplemented!();
-    }*/
     (SurfaceMatKind::PassThrough, VolumeMatKind::Dielectric, SurfaceMatKind::PassThrough, VolumeMatKind::Dielectric) => {
       Rc::new(DielectricDielectricInterfaceMatDef{
         inc_refractive_index: match inc_vol.real_refractive_index_at(x) {
@@ -91,6 +96,7 @@ pub struct LambertianInterfaceMatDef {
 
 impl InterfaceMat for LambertianInterfaceMatDef {
   fn scatter_surf_bwd(&self, inc_out_dir: Vector, inc_normal: Vector, /*epsilon: f32*/) -> (InterfaceEvent, Option<f32>) {
+    // FIXME: normalize for view-dependent intensity.
     let abs_p = self.absorb_prob;
     let u_abs: f32 = thread_rng().sample(Standard);
     if u_abs < abs_p {
@@ -130,10 +136,21 @@ pub struct SpecularInterfaceMatDef {
 
 impl InterfaceMat for SpecularInterfaceMatDef {
   fn scatter_surf_bwd(&self, inc_out_dir: Vector, inc_normal: Vector, /*epsilon: f32*/) -> (InterfaceEvent, Option<f32>) {
+    // TODO
+    unimplemented!();
+  }
+}
+
+pub struct MirrorInterfaceMatDef {
+  // TODO
+  absorb_prob:  f32,
+}
+
+impl InterfaceMat for MirrorInterfaceMatDef {
+  fn scatter_surf_bwd(&self, inc_out_dir: Vector, inc_normal: Vector, /*epsilon: f32*/) -> (InterfaceEvent, Option<f32>) {
+    // FIXME: normalize for view-dependent intensity.
     let i_cos = inc_out_dir.dot(inc_normal);
     assert!(i_cos >= 0.0);
-    //let inc_in_dir = -inc_normal;
-    //let inc_in_dir = (inc_out_dir - 2.0 * i_cos * inc_normal).normalize();
     let inc_in_dir = -(2.0 * i_cos * inc_normal - inc_out_dir).normalize();
     (InterfaceEvent::Reflect(inc_in_dir), None)
   }
@@ -174,6 +191,7 @@ pub enum SurfaceMatKind {
   PassThrough,
   Lambertian,
   Specular,
+  Mirror,
 }
 
 pub trait SurfaceMat {
@@ -213,13 +231,13 @@ impl SurfaceMat for LambertianSurfaceMatDef {
 }
 
 #[derive(Default)]
-pub struct SpecularSurfaceMatDef {
+pub struct MirrorSurfaceMatDef {
   pub absorb_prob:  f32,
 }
 
-impl SurfaceMat for SpecularSurfaceMatDef {
+impl SurfaceMat for MirrorSurfaceMatDef {
   fn surf_mat_kind(&self) -> SurfaceMatKind {
-    SurfaceMatKind::Specular
+    SurfaceMatKind::Mirror
   }
 
   fn query_surf_emission(&self, out_ray: Ray, inc_normal: Vector) -> f32 {
@@ -1033,10 +1051,11 @@ pub fn render_vol_rad(scene: &dyn VtraceScene, query_opts: QueryOpts, render_opt
       if pix_rad_accumulator > 0.0 {
         //println!("DEBUG: pix rad est: {:?}", pix_rad_accumulator);
       }
-      // FIXME: radiance to sRGB conversion.
-      //let pix_soft_val = (pix_rad_accumulator).atan() * FRAC_2_PI;
-      let pix_soft_val = pix_rad_accumulator;
-      let pix_val: u8 = ((pix_soft_val.max(0.0).min(1.0).powf(2.2)) * 255.0).round() as u8;
+      /*let pix_soft_val = (pix_rad_accumulator).atan() * FRAC_2_PI;
+      let pix_val: u8 = ((pix_soft_val.max(0.0).min(1.0).powf(2.2)) * 255.0).round() as u8;*/
+      let pix_linear_val = pix_rad_accumulator.max(0.0).min(1.0);
+      let pix_srgb_val = linear2srgb(pix_linear_val);
+      let pix_val: u8 = (pix_srgb_val * 255.0).round() as u8;
       flat_buf[0 + 3 * (screen_u + render_opts.im_width * screen_v)] = pix_val;
       flat_buf[1 + 3 * (screen_u + render_opts.im_width * screen_v)] = pix_val;
       flat_buf[2 + 3 * (screen_u + render_opts.im_width * screen_v)] = pix_val;
