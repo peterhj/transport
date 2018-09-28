@@ -4,7 +4,7 @@ use cgmath::*;
 use float::ord::*;
 use memarray::*;
 use rand::prelude::*;
-use rand::distributions::{OpenClosed01, Standard, StandardNormal, Uniform};
+use rand::distributions::{Open01, OpenClosed01, Standard, StandardNormal, Uniform};
 
 use std::f32::consts::{PI, FRAC_2_PI};
 use std::rc::{Rc};
@@ -1019,8 +1019,10 @@ pub fn render_vol_rad(scene: &dyn VtraceScene, query_opts: QueryOpts, render_opt
     for screen_u in 0 .. render_opts.im_width {
       let mut pix_rad_accumulator: f32 = 0.0;
       for i in 0 .. render_opts.rays_per_pix {
-        let camera_u = camera_uc + (0.5 + screen_u as f32) * camera_inc_u;
-        let camera_v = camera_vc + (0.5 + screen_v as f32) * camera_inc_v;
+        let jitter_u: f32 = thread_rng().sample(Open01);
+        let jitter_v: f32 = thread_rng().sample(Open01);
+        let camera_u = camera_uc + (jitter_u + screen_u as f32) * camera_inc_u;
+        let camera_v = camera_vc + (jitter_v + screen_v as f32) * camera_inc_v;
         let camera_w = -camera_depth;
         let camera_relp = Vector3{x: camera_u, y: camera_v, z: camera_w}.normalize();
         let out_dir = -rel_to_world.rotate_vector(camera_relp).normalize();
