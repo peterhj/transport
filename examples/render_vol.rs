@@ -17,6 +17,7 @@ use std::rc::{Rc};
 
 fn main() {
   let root_obj = Rc::new(SpaceObj::new(Rc::new(VacuumVolumeMatDef::default())));
+  //let root_obj = Rc::new(SpaceObj::new(Rc::new(HomogeneousDielectricVolumeMatDef::default_hg(0.001, 0.1))));
   let light_obj = Rc::new(QuadObj::new(vec![
       Vector3::new(-1.0, 1.58, -1.0),
       Vector3::new(-1.0, 1.58, 1.0),
@@ -37,8 +38,8 @@ fn main() {
       Vector3::new(-1.01, 0.0, 0.99),
       Vector3::new(1.0, 0.0, -1.04),
       Vector3::new(1.0, 0.0, 0.99),
-  //], Rc::new(LambertianSurfaceMatDef{absorb_prob: 0.0})));
-  ], Rc::new(MirrorSurfaceMatDef{absorb_prob: 0.0})));
+  ], Rc::new(LambertianSurfaceMatDef{absorb_prob: 0.0})));
+  //], Rc::new(MirrorSurfaceMatDef{absorb_prob: 0.0})));
   let leftwall_obj = Rc::new(QuadObj::new(vec![
       Vector3::new(-1.02, 1.59, -1.04),
       Vector3::new(-1.02, 1.59, 0.99),
@@ -73,8 +74,13 @@ fn main() {
     trace_epsilon:      1.0e-6,
     importance_clip:    None,
     //roulette_term_p:    None,
-    roulette_term_p:    Some(0.01),
+    //roulette_term_p:    Some(0.01),
+    roulette_term_p:    Some(0.1),
   };
+
+  //let im_dim = 64;
+  //let im_dim = 320;
+  let im_dim = 640;
 
   let render_opts = RenderOpts{
     cam_origin: Vector3::new(0.0, 0.92, 5.4),
@@ -82,22 +88,23 @@ fn main() {
     cam_up:     Vector3::new(0.0, 1.0, 0.0),
     //cam_fov:    Fov::Tangent(4.0),
     cam_fov:    Fov::Tangent(0.25),
-    im_width:   640,
-    im_height:  640,
+    im_width:   im_dim,
+    im_height:  im_dim,
     //rays_per_pix:   1,
+    //rays_per_pix:   2,
     //rays_per_pix:   10,
-    rays_per_pix:   100,
-    //rays_per_pix:   1000,
+    //rays_per_pix:   100,
+    rays_per_pix:   1000,
     //rays_per_pix:   10000,
   };
 
-  let mut buf = MemArray3d::<u8>::zeros([3, 640, 640]);
+  let mut buf = MemArray3d::<u8>::zeros([3, im_dim, im_dim]);
 
   //scene.render_depth(render_opts, &mut buf);
   scene.render_rad(query_opts, render_opts, &mut buf);
 
   let img_buf: Vec<_> = buf.flat_view().unwrap().as_slice().to_owned();
-  let img = Image::new(640, 640, 3, img_buf);
+  let img = Image::new(im_dim, im_dim, 3, img_buf);
   let png_data = img.write_png().unwrap();
   let mut png_file = File::create(&PathBuf::from("out.png")).unwrap();
   png_file.write_all(&png_data).unwrap();

@@ -97,35 +97,16 @@ pub struct LambertianInterfaceMatDef {
 impl InterfaceMat for LambertianInterfaceMatDef {
   fn scatter_surf_bwd(&self, inc_out_dir: Vector, inc_normal: Vector, /*epsilon: f32*/) -> (InterfaceEvent, Option<f32>) {
     // FIXME: normalize for view-dependent intensity.
-    let abs_p = self.absorb_prob;
-    let u_abs: f32 = thread_rng().sample(Standard);
-    if u_abs < abs_p {
-      (InterfaceEvent::Absorb, None)
-    } else {
-      // FIXME: correct cosine BRDF sampling.
-      /*let u_radial: f32 = thread_rng().sample(Standard);
-      //let u_cos2: f32 = thread_rng().sample(Standard);
-      let u: f32 = thread_rng().sample(Standard);
-      let u_cos2: f32 = (u / inc_out_dir.dot(inc_normal)).min(1.0);
-      let v_x = (2.0 * PI * u_radial).cos() * (1.0 - u_cos2).sqrt();
-      let v_y = (2.0 * PI * u_radial).sin() * (1.0 - u_cos2).sqrt();
-      let v_z = u_cos2.sqrt();*/
-      let v_x: f32 = thread_rng().sample(StandardNormal) as _;
-      let v_y: f32 = thread_rng().sample(StandardNormal) as _;
-      let v_z: f32 = thread_rng().sample(StandardNormal) as _;
-      let mut v = Vector3::new(v_x, v_y, v_z).normalize();
-      let v_dot_n = v.dot(inc_normal);
-      if v_dot_n < 0.0 {
-        v = -v;
-      }
-      let in_dir = -v;
-      /*let tfm = Quaternion::from_arc(Vector3::new(0.0, 0.0, 1.0), inc_normal, None);
-      //let in_dir = -inc_normal;
-      //let in_dir = -(tfm.rotate_vector(v) + 10.0 * inc_normal).normalize();
-      let in_dir = -tfm.rotate_vector(v).normalize();*/
-      (InterfaceEvent::Reflect(in_dir), None)
-      //(InterfaceEvent::Reflect(in_dir), Some(1.0 / v_dot_n.abs()))
+    let v_x: f32 = thread_rng().sample(StandardNormal) as _;
+    let v_y: f32 = thread_rng().sample(StandardNormal) as _;
+    let v_z: f32 = thread_rng().sample(StandardNormal) as _;
+    let mut v = Vector3::new(v_x, v_y, v_z).normalize();
+    let v_dot_n = v.dot(inc_normal);
+    if v_dot_n < 0.0 {
+      v = -v;
     }
+    /*(InterfaceEvent::Reflect(-v), Some(v_dot_n.abs()))*/
+    (InterfaceEvent::Reflect(-v), Some(1.0 / v_dot_n.abs()))
   }
 }
 
@@ -404,6 +385,17 @@ pub struct HomogeneousDielectricVolumeMatDef {
   pub scatter_dist:     Option<Rc<dyn HomogeneousScatterDist>>,
 }
 
+impl HomogeneousDielectricVolumeMatDef {
+  pub fn default_hg(scatter_coef: f32, g: f32) -> Self {
+    HomogeneousDielectricVolumeMatDef{
+      refractive_index: 1.0,
+      absorb_coef:      0.0,
+      scatter_coef:     scatter_coef,
+      scatter_dist:     Some(Rc::new(HGScatterDist{g})),
+    }
+  }
+}
+
 impl VolumeMat for HomogeneousDielectricVolumeMatDef {
   fn vol_mat_kind(&self) -> VolumeMatKind {
     VolumeMatKind::Dielectric
@@ -469,7 +461,22 @@ pub struct HGScatterDist {
 impl HomogeneousScatterDist for HGScatterDist {
   fn sample_bwd(&self, out_dir: Vector) -> Vector {
     // TODO
-    unimplemented!();
+    let g = self.g;
+    let u1: f32 = thread_rng().sample(Standard);
+    let r = (1.0 - g * g) / (1.0 + g * (2.0 * u1 - 1.0));
+    let mu = 0.5 / g * (1.0 + g * g - r * r);
+    let cos_th = mu.max(-1.0).min(1.0);
+    let sin_th = (1.0 - cos_th * cos_th).sqrt(); // FIXME: need random sign flip?
+    let u2: f32 = thread_rng().sample(Standard);
+    let phi = 2.0 * PI * u2;
+    let tfm = Quaternion::from_arc(Vector3::new(0.0, 0.0, 1.0), out_dir, None);
+    let v = Vector3::new(
+        phi.cos() * sin_th,
+        phi.sin() * sin_th,
+        cos_th,
+    ).normalize();
+    let in_dir = -tfm.rotate_vector(v);
+    in_dir
   }
 }
 
@@ -482,14 +489,14 @@ pub trait VtraceObj {
 }
 
 pub struct SpaceObj {
-  boundary_mat: Rc<InvisibleSurfaceMatDef>,
+  boundary_mat: Rc<PassThroughSurfaceMatDef>,
   interior_mat: Rc<dyn VolumeMat>,
 }
 
 impl SpaceObj {
   pub fn new(interior_mat: Rc<dyn VolumeMat>) -> Self {
     SpaceObj{
-      boundary_mat: Rc::new(InvisibleSurfaceMatDef{}),
+      boundary_mat: Rc::new(PassThroughSurfaceMatDef::default()),
       interior_mat,
     }
   }
@@ -539,8 +546,9 @@ impl SphereObj {
 impl VtraceObj for SphereObj {
   fn intersect_bwd(&self, out_ray: Ray, epsilon: f32) -> Option<(Vector, f32)> {
     // TODO
+    let d = -out_ray.dir;
     let delta = out_ray.origin - self.center;
-    let b = -out_ray.dir.dot(delta);
+    let b = d.dot(delta);
     let determinant = b * b + self.radius * self.radius - delta.dot(delta);
     if determinant < -epsilon {
       None
@@ -566,7 +574,6 @@ impl VtraceObj for SphereObj {
 
   fn incident_normal(&self, inc_ray: Ray) -> Option<Vector> {
     let delta = inc_ray.origin - self.center;
-    //let proj = self.center + self.radius * delta.normalize();
     let n = delta.normalize();
     if inc_ray.dir.dot(n) >= 0.0 {
       Some(n)
@@ -576,8 +583,10 @@ impl VtraceObj for SphereObj {
   }
 
   fn project(&self, x: Vector) -> Vector {
-    // TODO
-    unimplemented!();
+    let delta = x - self.center;
+    let n = delta.normalize();
+    let xp = self.center + self.radius * n;
+    xp
   }
 
   fn boundary_surf_mat(&self) -> Rc<dyn SurfaceMat> {
