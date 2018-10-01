@@ -76,6 +76,7 @@ fn main() {
     //roulette_term_p:    None,
     //roulette_term_p:    Some(0.01),
     roulette_term_p:    Some(0.1),
+    verbose:            false,
   };
 
   //let im_dim = 64;
@@ -92,6 +93,7 @@ fn main() {
     im_height:  im_dim,
     //rays_per_pix:   1,
     //rays_per_pix:   2,
+    //rays_per_pix:   3,
     //rays_per_pix:   10,
     //rays_per_pix:   100,
     rays_per_pix:   1000,

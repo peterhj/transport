@@ -74,6 +74,7 @@ pub fn interface_at(
       })
     }
     (SurfaceMatKind::PassThrough, VolumeMatKind::Dielectric, SurfaceMatKind::PassThrough, VolumeMatKind::Dielectric) => {
+      //panic!("DEBUG: created dielectric-dielectric interface");
       Rc::new(DielectricDielectricInterfaceMatDef{
         inc_refractive_index: match inc_vol.real_refractive_index_at(x) {
           None => panic!("dielectric interface missing incident real refractive index"),
@@ -561,13 +562,19 @@ impl VtraceObj for SphereObj {
         (true,  false)  => t2,
         (true,  true)   => return None,
       };
-      //Some(RayIntersection{ray_coord: Parametric{t}})
-      let xp = out_ray.origin - t * out_ray.dir;
+      //let xp = out_ray.origin - t * out_ray.dir;
+      let x = out_ray.origin - t * out_ray.dir;
+      let delta = x - self.center;
+      let n = delta.normalize();
+      let xp = self.center + self.radius * n;
       Some((xp, t))
     } else {
       let t = -b;
-      //Some(RayIntersection{ray_coord: Parametric{t}})
-      let xp = out_ray.origin - t * out_ray.dir;
+      //let xp = out_ray.origin - t * out_ray.dir;
+      let x = out_ray.origin - t * out_ray.dir;
+      let delta = x - self.center;
+      let n = delta.normalize();
+      let xp = self.center + self.radius * n;
       Some((xp, t))
     }
   }
@@ -756,6 +763,7 @@ pub struct QueryOpts {
   pub trace_epsilon:    f32,
   pub importance_clip:  Option<f32>,
   pub roulette_term_p:  Option<f32>,
+  pub verbose:          bool,
 }
 
 #[derive(Clone, Copy)]
@@ -771,8 +779,8 @@ pub struct RenderOpts {
 
 pub trait VtraceScene {
   fn trace_bwd(&self, out_ray: Ray, obj_id: Option<usize>, epsilon: f32) -> TraceEvent;
-  fn query_surf_rad_bwd(&self, out_ray: Ray, inc_obj_id: Option<usize>, ext_obj_id: Option<usize>, default_opts: QueryOpts) -> f32;
-  fn query_vol_rad_bwd(&self, out_ray: Ray, obj_id: Option<usize>, top_level: bool, /*top_level_opts: Option<QueryOpts>,*/ default_opts: QueryOpts) -> f32;
+  fn query_surf_rad_bwd(&self, out_ray: Ray, inc_obj_id: Option<usize>, ext_obj_id: Option<usize>, depth: usize, default_opts: QueryOpts) -> f32;
+  fn query_vol_rad_bwd(&self, out_ray: Ray, obj_id: Option<usize>, top_level: bool, depth: usize, /*top_level_opts: Option<QueryOpts>,*/ default_opts: QueryOpts) -> f32;
 
   fn render_depth(&self, render_opts: RenderOpts, buf: &mut MemArray3d<u8>) where Self: Sized {
     render_depth(self, render_opts, buf);
@@ -822,7 +830,7 @@ impl VtraceScene for SimpleVtraceScene {
     }
   }
 
-  fn query_surf_rad_bwd(&self, out_ray: Ray, inc_obj_id: Option<usize>, ext_obj_id: Option<usize>, default_opts: QueryOpts) -> f32 {
+  fn query_surf_rad_bwd(&self, out_ray: Ray, inc_obj_id: Option<usize>, ext_obj_id: Option<usize>, depth: usize, default_opts: QueryOpts) -> f32 {
     // TODO: project the intersection to the surface?
     let inc_obj = match inc_obj_id {
       None => unimplemented!("querying objects by coordinates is not supported"),
@@ -856,16 +864,27 @@ impl VtraceScene for SimpleVtraceScene {
       if do_mc {
         let (recurs_mc_est, recurs_mc_norm) = match interface.scatter_surf_bwd(out_ray.dir, normal_dir) {
           (InterfaceEvent::Absorb, scatter_norm) => {
+            if default_opts.verbose {
+              println!("DEBUG: query_surf_rad_bwd: depth: {} scatter surf: absorb", depth);
+            }
             (0.0, scatter_norm)
           }
           (InterfaceEvent::Reflect(in_dir), scatter_norm) => {
-            let in_ray = Ray{origin: out_ray.origin, dir: in_dir};
-            let next_est_rad = self.query_vol_rad_bwd(in_ray, inc_obj_id, false, default_opts);
+            if default_opts.verbose {
+              println!("DEBUG: query_surf_rad_bwd: depth: {} scatter surf: reflect: inc obj: {:?}", depth, inc_obj_id);
+            }
+            let eps = default_opts.trace_epsilon;
+            let in_ray = Ray{origin: out_ray.origin - eps * in_dir, dir: in_dir};
+            let next_est_rad = self.query_vol_rad_bwd(in_ray, inc_obj_id, false, depth + 1, default_opts);
             (next_est_rad, scatter_norm)
           }
           (InterfaceEvent::Transmit(in_dir), scatter_norm) => {
-            let in_ray = Ray{origin: out_ray.origin, dir: in_dir};
-            let next_est_rad = self.query_vol_rad_bwd(in_ray, ext_obj_id, false, default_opts);
+            if default_opts.verbose {
+              println!("DEBUG: query_surf_rad_bwd: depth: {} scatter surf: transmit: ext obj: {:?}", depth, ext_obj_id);
+            }
+            let eps = default_opts.trace_epsilon;
+            let in_ray = Ray{origin: out_ray.origin - eps * in_dir, dir: in_dir};
+            let next_est_rad = self.query_vol_rad_bwd(in_ray, ext_obj_id, false, depth + 1, default_opts);
             (next_est_rad, scatter_norm)
           }
         };
@@ -883,6 +902,9 @@ impl VtraceScene for SimpleVtraceScene {
           }
         }
       } else {
+        if default_opts.verbose {
+          println!("DEBUG: query_surf_rad_bwd: depth: {} roulette kill", depth);
+        }
         0.0
       }
     };
@@ -890,7 +912,12 @@ impl VtraceScene for SimpleVtraceScene {
     this_rad
   }
 
-  fn query_vol_rad_bwd(&self, out_dst_ray: Ray, vol_obj_id: Option<usize>, top_level: bool, default_opts: QueryOpts) -> f32 {
+  fn query_vol_rad_bwd(&self, out_dst_ray: Ray, vol_obj_id: Option<usize>, top_level: bool, depth: usize, default_opts: QueryOpts) -> f32 {
+    /*if default_opts.verbose {
+      if top_level {
+        println!("DEBUG: query_vol_rad_bwd:  top level");
+      }
+    }*/
     let (surf_cutoff_dist, surf_pt, surf_obj_id) = match self.trace_bwd(out_dst_ray, vol_obj_id, default_opts.trace_epsilon) {
       TraceEvent::NonTerm => {
         (None, None, None)
@@ -916,24 +943,30 @@ impl VtraceScene for SimpleVtraceScene {
       if do_mc {
         let (recurs_mc_est, recurs_mc_norm)  = match this_vol.woodcock_track_bwd(out_dst_ray, surf_cutoff_dist) {
           AttenuationEvent::NonTerm => {
-            //println!("DEBUG: mc vol: woodcock track: non terminal");
+            if default_opts.verbose {
+              println!("DEBUG: query_vol_rad_bwd:  depth: {} woodcock track: non terminal", depth);
+            }
             (0.0, None)
           }
           AttenuationEvent::Cutoff(..) => {
-            //println!("DEBUG: mc vol: woodcock track: cutoff");
+            if default_opts.verbose {
+              println!("DEBUG: query_vol_rad_bwd:  depth: {} woodcock track: cutoff: surf obj: {:?}", depth, surf_obj_id);
+            }
             let out_src_ray = Ray{origin: surf_pt.unwrap(), dir: out_dst_ray.dir};
-            let next_est_rad = self.query_surf_rad_bwd(out_src_ray, vol_obj_id, surf_obj_id, default_opts);
+            let next_est_rad = self.query_surf_rad_bwd(out_src_ray, vol_obj_id, surf_obj_id, depth + 1, default_opts);
             (next_est_rad, None)
           }
           AttenuationEvent::Attenuate(p, dist) => {
-            //println!("DEBUG: mc vol: woodcock track: attenuate");
+            if default_opts.verbose {
+              println!("DEBUG: query_vol_rad_bwd:  depth: {} woodcock track: attenuate", depth);
+            }
             let out_src_ray = Ray{origin: p, dir: out_dst_ray.dir};
             let next_est_rad = match this_vol.scatter_vol_bwd(out_src_ray) {
               ScatterEvent::Absorb => {
                 0.0
               }
               ScatterEvent::Scatter(in_ray) => {
-                self.query_vol_rad_bwd(in_ray, vol_obj_id, false, default_opts)
+                self.query_vol_rad_bwd(in_ray, vol_obj_id, false, depth + 1, default_opts)
               }
             };
             (next_est_rad, Some(this_vol.vol_extinction_coef_at(out_src_ray.origin)))
@@ -953,6 +986,9 @@ impl VtraceScene for SimpleVtraceScene {
           }
         }
       } else {
+        if default_opts.verbose {
+          println!("DEBUG: query_vol_rad_bwd:  depth: {} roulette kill", depth);
+        }
         0.0
       }
     };
@@ -1044,6 +1080,13 @@ pub fn render_vol_rad(scene: &dyn VtraceScene, query_opts: QueryOpts, render_opt
 
   for screen_v in 0 .. render_opts.im_height {
     for screen_u in 0 .. render_opts.im_width {
+      let mut do_debug = false;
+      /*if screen_u >= 400 && screen_u <= 428 && screen_v >= 512 && screen_v <= 532 {
+        do_debug = true;
+      }*/
+      if do_debug {
+        println!("DEBUG: render_vol_rad: u: {} v: {}", screen_u, screen_v);
+      }
       let mut pix_rad_accumulator: f32 = 0.0;
       for i in 0 .. render_opts.rays_per_pix {
         let jitter_u: f32 = thread_rng().sample(Open01);
@@ -1054,7 +1097,14 @@ pub fn render_vol_rad(scene: &dyn VtraceScene, query_opts: QueryOpts, render_opt
         let camera_relp = Vector3{x: camera_u, y: camera_v, z: camera_w}.normalize();
         let out_dir = -rel_to_world.rotate_vector(camera_relp).normalize();
         let out_ray = Ray{origin: render_opts.cam_origin, dir: out_dir};
-        let pix_rad = scene.query_vol_rad_bwd(out_ray, Some(0), true, query_opts);
+        let query_opts = if do_debug {
+          let mut debug_query_opts = query_opts;
+          debug_query_opts.verbose = true;
+          debug_query_opts
+        } else {
+          query_opts
+        };
+        let pix_rad = scene.query_vol_rad_bwd(out_ray, Some(0), true, 0, query_opts);
         pix_rad_accumulator += 1.0 / (i as f32 + 1.0) * (pix_rad - pix_rad_accumulator);
       }
       if pix_rad_accumulator > 0.0 {
@@ -1065,9 +1115,15 @@ pub fn render_vol_rad(scene: &dyn VtraceScene, query_opts: QueryOpts, render_opt
       let pix_linear_val = pix_rad_accumulator.max(0.0).min(1.0);
       let pix_srgb_val = linear2srgb(pix_linear_val);
       let pix_val: u8 = (pix_srgb_val * 255.0).round() as u8;
-      flat_buf[0 + 3 * (screen_u + render_opts.im_width * screen_v)] = pix_val;
-      flat_buf[1 + 3 * (screen_u + render_opts.im_width * screen_v)] = pix_val;
-      flat_buf[2 + 3 * (screen_u + render_opts.im_width * screen_v)] = pix_val;
+      if do_debug {
+        flat_buf[0 + 3 * (screen_u + render_opts.im_width * screen_v)] = 0;
+        flat_buf[1 + 3 * (screen_u + render_opts.im_width * screen_v)] = pix_val;
+        flat_buf[2 + 3 * (screen_u + render_opts.im_width * screen_v)] = 0;
+      } else {
+        flat_buf[0 + 3 * (screen_u + render_opts.im_width * screen_v)] = pix_val;
+        flat_buf[1 + 3 * (screen_u + render_opts.im_width * screen_v)] = pix_val;
+        flat_buf[2 + 3 * (screen_u + render_opts.im_width * screen_v)] = pix_val;
+      }
     }
   }
 }
