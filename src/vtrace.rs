@@ -49,6 +49,11 @@ pub fn interface_at(
 {
   // TODO
   match (inc_surf.surf_mat_kind(), inc_vol.vol_mat_kind(), ext_surf.surf_mat_kind(), ext_vol.vol_mat_kind()) {
+    (SurfaceMatKind::PassThrough, _, SurfaceMatKind::Sink, _) |
+    (SurfaceMatKind::Sink, _, SurfaceMatKind::PassThrough, _) => {
+      // TODO
+      Rc::new(SinkInterfaceMatDef{})
+    }
     (SurfaceMatKind::PassThrough, _, SurfaceMatKind::Lambertian, _) => {
       // TODO
       Rc::new(LambertianInterfaceMatDef{
@@ -86,7 +91,19 @@ pub fn interface_at(
         },
       })
     }
-    _ => unreachable!(),
+    x => {
+      panic!("unsupported interface combo: {:?}", x);
+    }
+  }
+}
+
+pub struct SinkInterfaceMatDef {
+  // TODO
+}
+
+impl InterfaceMat for SinkInterfaceMatDef {
+  fn scatter_surf_bwd(&self, inc_out_dir: Vector, inc_normal: Vector, /*epsilon: f32*/) -> (InterfaceEvent, Option<f32>) {
+    (InterfaceEvent::Absorb, None)
   }
 }
 
@@ -168,9 +185,10 @@ impl InterfaceMat for DielectricDielectricInterfaceMatDef {
   }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum SurfaceMatKind {
   PassThrough,
+  Sink,
   Lambertian,
   Specular,
   Mirror,
@@ -233,7 +251,7 @@ pub struct SphericalLightSurfaceMatDef {
 
 impl SurfaceMat for SphericalLightSurfaceMatDef {
   fn surf_mat_kind(&self) -> SurfaceMatKind {
-    SurfaceMatKind::PassThrough
+    SurfaceMatKind::Sink
   }
 
   fn query_surf_emission(&self, out_ray: Ray, inc_normal: Vector) -> f32 {
@@ -247,7 +265,7 @@ pub struct HemisphericalLightSurfaceMatDef {
 
 impl SurfaceMat for HemisphericalLightSurfaceMatDef {
   fn surf_mat_kind(&self) -> SurfaceMatKind {
-    SurfaceMatKind::PassThrough
+    SurfaceMatKind::Sink
   }
 
   fn query_surf_emission(&self, out_ray: Ray, inc_normal: Vector) -> f32 {
@@ -272,7 +290,7 @@ pub enum AttenuationEvent {
   Attenuate(Vector, f32),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum VolumeMatKind {
   Unspecified,
   Dielectric,
