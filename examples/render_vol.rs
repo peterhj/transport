@@ -110,6 +110,7 @@ fn main() {
   };
 
   //let im_dim = 64;
+  //let im_dim = 160;
   //let im_dim = 320;
   let im_dim = 640;
 
@@ -123,13 +124,13 @@ fn main() {
     cam_fov:    Fov::Tangent(0.25),
     im_width:   im_dim,
     im_height:  im_dim,
-    //rays_per_pix:   1,
-    //rays_per_pix:   2,
-    //rays_per_pix:   3,
-    //rays_per_pix:   10,
-    rays_per_pix:   100,
-    //rays_per_pix:   1000,
-    //rays_per_pix:   10000,
+    //paths_per_px:   1,
+    //paths_per_px:   2,
+    //paths_per_px:   3,
+    //paths_per_px:   10,
+    paths_per_px:   100,
+    //paths_per_px:   1000,
+    //paths_per_px:   10000,
   };
 
   let mut buf = MemArray3d::<u8>::zeros([3, im_dim, im_dim]);

@@ -792,7 +792,7 @@ pub struct RenderOpts {
   pub cam_fov:      Fov,
   pub im_width:     usize,
   pub im_height:    usize,
-  pub rays_per_pix: usize,
+  pub paths_per_px: usize,
 }
 
 pub trait VtraceScene {
@@ -1106,7 +1106,7 @@ pub fn render_vol_rad(scene: &dyn VtraceScene, query_opts: QueryOpts, render_opt
         println!("DEBUG: render_vol_rad: u: {} v: {}", screen_u, screen_v);
       }
       let mut pix_rad_accumulator: f32 = 0.0;
-      for i in 0 .. render_opts.rays_per_pix {
+      for i in 0 .. render_opts.paths_per_px {
         let jitter_u: f32 = thread_rng().sample(Open01);
         let jitter_v: f32 = thread_rng().sample(Open01);
         let camera_u = camera_uc + (jitter_u + screen_u as f32) * camera_inc_u;
