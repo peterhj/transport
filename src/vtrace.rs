@@ -1,4 +1,4 @@
-use ::geometry::*;
+use crate::geometry::*;
 
 use cgmath::*;
 use float::ord::*;

@@ -6,9 +6,7 @@ extern crate transport;
 use cgmath::*;
 use memarray::*;
 use stb_image::image::{Image};
-//use transport::geometry::*;
 use transport::vtrace::*;
-//use transport::utils::*;
 
 use std::fs::{File};
 use std::io::{Write};
